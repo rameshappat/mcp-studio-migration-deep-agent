@@ -85,16 +85,24 @@ class SDLCPipelineOrchestrator:
             human_in_loop: Human-in-the-loop handler.
             interactive: Whether to prompt for human input.
         """
-        self.llm = llm or ChatOpenAI(model="gpt-4o", temperature=0.7)
+        # If a shared LLM is provided, all agents will use it.
+        # Otherwise, each agent will instantiate its own LLM (enables per-role model selection via env vars).
+        self.llm = llm
         self.github_client = github_client
         self.ado_client = ado_client
         self.hitl = human_in_loop or HumanInTheLoop(interactive=interactive)
 
-        # Initialize agents with shared LLM
-        self.product_manager = ProductManagerAgent(llm=self.llm)
-        self.business_analyst = BusinessAnalystAgent(llm=self.llm, ado_client=ado_client)
-        self.architect = ArchitectAgent(llm=self.llm)
-        self.developer = DeveloperAgent(llm=self.llm, github_client=github_client)
+        # Initialize agents
+        if self.llm is not None:
+            self.product_manager = ProductManagerAgent(llm=self.llm)
+            self.business_analyst = BusinessAnalystAgent(llm=self.llm, ado_client=ado_client)
+            self.architect = ArchitectAgent(llm=self.llm)
+            self.developer = DeveloperAgent(llm=self.llm, github_client=github_client)
+        else:
+            self.product_manager = ProductManagerAgent()
+            self.business_analyst = BusinessAnalystAgent(ado_client=ado_client)
+            self.architect = ArchitectAgent()
+            self.developer = DeveloperAgent(github_client=github_client)
 
         self.state = PipelineState()
 

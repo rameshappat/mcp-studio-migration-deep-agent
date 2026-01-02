@@ -24,7 +24,7 @@ class DeveloperAgent(BaseAgent):
     def __init__(
         self,
         llm: ChatOpenAI | None = None,
-        model_name: str = "gpt-4o",
+        model_name: str = "o1-mini",
         temperature: float = 0.3,
         github_client: Any = None,
     ):
@@ -40,64 +40,47 @@ class DeveloperAgent(BaseAgent):
     @property
     def system_prompt(self) -> str:
         """Return the system prompt for the Developer."""
-        return """You are an experienced Full-Stack Developer with expertise in 
-modern web technologies and best practices.
+        return """You are a Staff/Principal Full-Stack Developer delivering production-quality software.
 
-Your responsibilities:
-1. Implement features based on user stories and architecture
-2. Write clean, maintainable, well-documented code
-3. Follow SOLID principles and design patterns
-4. Create unit tests for all components
-5. Set up project structure and configurations
+Primary objective:
+- Implement the approved backlog and architecture into a working codebase that is testable, secure-by-default, and maintainable.
 
-When generating code, structure your output as JSON:
+Grounding rules:
+- Do not invent endpoints, entities, or flows that contradict the provided requirements/architecture.
+- If something is underspecified, implement the safest minimal assumption and record it in "assumptions".
+- Prefer standard, boring solutions that teams can operate.
+
+Output rules:
+- Output ONLY valid JSON. No markdown, no prose.
+- Every file entry must contain full file content (no placeholders like "...existing code...").
+- Keep dependencies minimal and consistent with the chosen stack.
+
+Required JSON shape (you may add additional fields, but keep these keys):
 {
-    "project_structure": {
-        "directories": ["src/", "tests/", "docs/"],
-        "description": "Project layout explanation"
-    },
-    "files": [
-        {
-            "path": "src/main.py",
-            "language": "python",
-            "description": "Main application entry point",
-            "content": "# File content here"
-        }
-    ],
-    "dependencies": {
-        "runtime": ["fastapi", "uvicorn", "sqlalchemy"],
-        "development": ["pytest", "black", "mypy"]
-    },
-    "configuration_files": [
-        {
-            "path": "pyproject.toml",
-            "content": "# Configuration content"
-        }
-    ],
-    "docker": {
-        "dockerfile": "Dockerfile content",
-        "docker_compose": "docker-compose.yml content"
-    },
-    "tests": [
-        {
-            "path": "tests/test_main.py",
-            "description": "Unit tests for main module",
-            "content": "# Test content"
-        }
-    ],
-    "documentation": {
-        "readme": "README.md content",
-        "api_docs": "API documentation"
+  "assumptions": ["..."],
+  "project_structure": {"directories": ["src/", "tests/"], "description": "..."},
+  "files": [
+    {
+      "path": "src/...",
+      "language": "python|typescript|yaml|dockerfile|toml|json",
+      "description": "...",
+      "content": "full file contents"
     }
+  ],
+  "dependencies": {"runtime": ["..."], "development": ["..."]},
+  "configuration_files": [{"path": "...", "content": "..."}],
+  "docker": {"dockerfile": "...", "docker_compose": "..."},
+  "tests": [{"path": "...", "description": "...", "content": "..."}],
+  "documentation": {"readme": "...", "api_docs": "..."}
 }
 
-Follow these best practices:
-- Use type hints in Python
-- Write comprehensive docstrings
-- Include error handling
-- Add logging for debugging
-- Create reusable components
-- Follow the architecture provided by the Architect"""
+Engineering quality bar:
+- Include input validation, clear error handling, and structured logging.
+- Include authn/authz scaffolding if required.
+- Add unit tests for critical logic and at least one integration-style test for a key API path when applicable.
+- Ensure configuration is environment-driven (no secrets in code).
+- Match repository conventions (src/, tests/, pyproject/requirements as present).
+"""
 
     def set_github_client(self, github_client: Any) -> None:
         """Set the GitHub MCP client."""
@@ -119,7 +102,30 @@ Follow these best practices:
             else:
                 json_str = content
 
-            code_output = json.loads(json_str)
+            json_str = json_str.strip()
+
+            # Heuristic cleanup: if the model prefixed output with stray chars,
+            # try to carve out the first JSON object/array region.
+            candidate = json_str.lstrip()
+            if not candidate.startswith(("{", "[")):
+                obj_idx = candidate.find("{")
+                arr_idx = candidate.find("[")
+                starts = [i for i in (obj_idx, arr_idx) if i != -1]
+                if starts:
+                    candidate = candidate[min(starts) :]
+            end_obj = candidate.rfind("}")
+            end_arr = candidate.rfind("]")
+            end = max(end_obj, end_arr)
+            if end != -1:
+                candidate = candidate[: end + 1]
+
+            try:
+                code_output = json.loads(candidate)
+            except json.JSONDecodeError:
+                # Best-effort tolerant parse (e.g., trailing commas).
+                import json5  # type: ignore
+
+                code_output = json5.loads(candidate)
             artifacts["code"] = code_output
 
             # Extract files for easier access
@@ -129,7 +135,7 @@ Follow these best practices:
                     content_str = file_info.get("content", "")
                     context.code_artifacts[path] = content_str
 
-        except (json.JSONDecodeError, IndexError) as e:
+        except (Exception,) as e:
             logger.warning(f"Could not parse structured output: {e}")
             # Try to extract code blocks
             artifacts["code_blocks"] = self._extract_code_blocks(content)

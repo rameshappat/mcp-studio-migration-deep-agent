@@ -1,6 +1,7 @@
 """Base agent class for all specialized agents."""
 
 import logging
+import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
@@ -69,7 +70,7 @@ class BaseAgent(ABC):
         self,
         role: AgentRole,
         llm: ChatOpenAI | None = None,
-        model_name: str = "gpt-4o",
+        model_name: str = "gpt-4-turbo",
         temperature: float = 0.7,
     ):
         """Initialize the base agent.
@@ -81,11 +82,105 @@ class BaseAgent(ABC):
             temperature: Temperature for LLM responses (if llm not provided).
         """
         self.role = role
-        self.model_name = model_name
-        self.temperature = temperature
-        self._llm = llm if llm is not None else ChatOpenAI(model=model_name, temperature=temperature)
+
+        resolved_model = self._resolve_model_name(role=role, default=model_name)
+        resolved_temperature = self._resolve_temperature(role=role, default=temperature)
+        resolved_provider = self._resolve_provider(role=role)
+
+        self.model_name = resolved_model
+        self.temperature = resolved_temperature
+        self.provider = resolved_provider
+        self._llm = llm if llm is not None else self._create_llm(
+            provider=resolved_provider,
+            model=resolved_model,
+            temperature=resolved_temperature,
+        )
         self._tools: list[Any] = []
         self._human_approval_callback: Callable[[AgentMessage], ApprovalStatus] | None = None
+
+    @staticmethod
+    def _resolve_provider(role: AgentRole) -> str:
+        """Resolve LLM provider.
+
+        Supported values: "openai" (default), "anthropic".
+        Priority:
+        1) SDLC_LLM_PROVIDER_<ROLE_NAME>
+        2) SDLC_LLM_PROVIDER_<ROLE_VALUE>
+        3) SDLC_LLM_PROVIDER_DEFAULT
+        4) openai
+        """
+        candidates = [
+            f"SDLC_LLM_PROVIDER_{role.name}",
+            f"SDLC_LLM_PROVIDER_{role.value.upper()}",
+            "SDLC_LLM_PROVIDER_DEFAULT",
+        ]
+        for key in candidates:
+            value = os.environ.get(key)
+            if value and value.strip():
+                return value.strip().lower()
+        return "openai"
+
+    @staticmethod
+    def _create_llm(provider: str, model: str, temperature: float):
+        """Create an LLM instance for the selected provider."""
+        if provider == "anthropic":
+            try:
+                from langchain_anthropic import ChatAnthropic
+            except Exception as e:  # pragma: no cover
+                raise RuntimeError(
+                    "Anthropic provider selected but langchain-anthropic is not installed. "
+                    "Install it (pip install langchain-anthropic) or set SDLC_LLM_PROVIDER_DEFAULT=openai."
+                ) from e
+            return ChatAnthropic(model=model, temperature=temperature)
+
+        # Default: OpenAI
+        return ChatOpenAI(model=model, temperature=temperature)
+
+    @staticmethod
+    def _resolve_model_name(role: AgentRole, default: str) -> str:
+        """Resolve model name with optional per-role environment overrides.
+
+        Priority:
+        1) SDLC_MODEL_<ROLE_NAME> (e.g., SDLC_MODEL_PRODUCT_MANAGER)
+        2) SDLC_MODEL_<ROLE_VALUE> (e.g., SDLC_MODEL_PRODUCT_MANAGER via role.value)
+        3) SDLC_MODEL_DEFAULT
+        4) default
+        """
+        candidates = [
+            f"SDLC_MODEL_{role.name}",
+            f"SDLC_MODEL_{role.value.upper()}",
+            "SDLC_MODEL_DEFAULT",
+        ]
+        for key in candidates:
+            value = os.environ.get(key)
+            if value and value.strip():
+                return value.strip()
+        return default
+
+    @staticmethod
+    def _resolve_temperature(role: AgentRole, default: float) -> float:
+        """Resolve temperature with optional per-role environment overrides.
+
+        Priority:
+        1) SDLC_TEMPERATURE_<ROLE_NAME>
+        2) SDLC_TEMPERATURE_<ROLE_VALUE>
+        3) SDLC_TEMPERATURE_DEFAULT
+        4) default
+        """
+        candidates = [
+            f"SDLC_TEMPERATURE_{role.name}",
+            f"SDLC_TEMPERATURE_{role.value.upper()}",
+            "SDLC_TEMPERATURE_DEFAULT",
+        ]
+        for key in candidates:
+            value = os.environ.get(key)
+            if not value or not value.strip():
+                continue
+            try:
+                return float(value.strip())
+            except ValueError:
+                logger.warning(f"Ignoring invalid {key}={value!r}; using default")
+        return default
 
     @property
     @abstractmethod

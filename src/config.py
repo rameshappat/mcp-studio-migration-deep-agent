@@ -15,6 +15,9 @@ class Config:
     # OpenAI
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
 
+    # Anthropic
+    anthropic_api_key: str = os.getenv("ANTHROPIC_API_KEY", "")
+
     # LangSmith
     langsmith_api_key: str = os.getenv("LANGSMITH_API_KEY", "")
     langsmith_project: str = os.getenv("LANGSMITH_PROJECT", "python-mcp-agent")
@@ -36,8 +39,25 @@ class Config:
     def validate(self) -> list[str]:
         """Validate required configuration. Returns list of missing keys."""
         missing = []
-        if not self.openai_api_key:
+        # Require OpenAI key if any provider is OpenAI (default)
+        provider_default = os.getenv("SDLC_LLM_PROVIDER_DEFAULT", "openai").lower()
+        provider_roles = [
+            os.getenv("SDLC_LLM_PROVIDER_PRODUCT_MANAGER", ""),
+            os.getenv("SDLC_LLM_PROVIDER_BUSINESS_ANALYST", ""),
+            os.getenv("SDLC_LLM_PROVIDER_ARCHITECT", ""),
+            os.getenv("SDLC_LLM_PROVIDER_DEVELOPER", ""),
+        ]
+        uses_anthropic = provider_default == "anthropic" or any(
+            p.strip().lower() == "anthropic" for p in provider_roles if p
+        )
+        uses_openai = not uses_anthropic or provider_default == "openai" or any(
+            p.strip().lower() == "openai" for p in provider_roles if p
+        )
+
+        if uses_openai and not self.openai_api_key:
             missing.append("OPENAI_API_KEY")
+        if uses_anthropic and not self.anthropic_api_key:
+            missing.append("ANTHROPIC_API_KEY")
         return missing
 
 

@@ -43,7 +43,12 @@ class AzureDevOpsMCPClient:
         self._pat: str = ""
         
         # Map various PAT env var names to ADO_MCP_AUTH_TOKEN for the MCP server
-        pat = os.environ.get("ADO_MCP_AUTH_TOKEN") or os.environ.get("AZURE_DEVOPS_EXT_PAT") or os.environ.get("AZURE_DEVOPS_PAT", "")
+        pat = (
+            os.environ.get("ADO_MCP_AUTH_TOKEN")
+            or os.environ.get("AZURE_DEVOPS_EXT_PAT")
+            or os.environ.get("AZURE_DEVOPS_PAT")
+            or os.environ.get("AZURE_DEVOPS_TOKEN", "")
+        )
         if pat:
             self._pat = pat
             os.environ["ADO_MCP_AUTH_TOKEN"] = pat

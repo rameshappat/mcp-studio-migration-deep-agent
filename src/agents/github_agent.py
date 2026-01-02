@@ -1,6 +1,7 @@
 """GitHub Agent using LangGraph for orchestration."""
 
 import logging
+import os
 from typing import Annotated, Any, TypedDict
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
@@ -39,10 +40,50 @@ class GitHubAgent:
             max_tool_calls: Maximum number of tool calls per request.
         """
         self.mcp_client = mcp_client
-        self.model_name = model_name
+
+        # Allow the GitHub agent to be configured the same way as SDLC agents.
+        # These env vars are OPTIONAL and default to the passed model_name and OpenAI provider.
+        self.provider = (
+            os.getenv("SDLC_LLM_PROVIDER_GITHUB_AGENT")
+            or os.getenv("SDLC_LLM_PROVIDER_DEFAULT")
+            or "openai"
+        ).strip().lower()
+        self.model_name = (
+            os.getenv("SDLC_MODEL_GITHUB_AGENT")
+            or os.getenv("SDLC_MODEL_DEFAULT")
+            or model_name
+        ).strip()
+        self.temperature = self._resolve_temperature(default=0.0)
         self.max_tool_calls = max_tool_calls
         self._graph = None
         self._tools = []
+
+    def _resolve_temperature(self, default: float) -> float:
+        value = (
+            os.getenv("SDLC_TEMPERATURE_GITHUB_AGENT")
+            or os.getenv("SDLC_TEMPERATURE_DEFAULT")
+            or ""
+        ).strip()
+        if not value:
+            return default
+        try:
+            return float(value)
+        except ValueError:
+            logger.warning(f"Ignoring invalid SDLC_TEMPERATURE_GITHUB_AGENT={value!r}; using default")
+            return default
+
+    def _create_llm(self):
+        if self.provider == "anthropic":
+            try:
+                from langchain_anthropic import ChatAnthropic
+            except Exception as e:  # pragma: no cover
+                raise RuntimeError(
+                    "Anthropic provider selected for GitHubAgent but langchain-anthropic is not installed. "
+                    "Install it (pip install langchain-anthropic) or set SDLC_LLM_PROVIDER_GITHUB_AGENT=openai."
+                ) from e
+            return ChatAnthropic(model=self.model_name, temperature=self.temperature)
+
+        return ChatOpenAI(model=self.model_name, temperature=self.temperature)
 
     async def initialize(self) -> None:
         """Initialize the agent with tools from MCP."""
@@ -65,7 +106,7 @@ class GitHubAgent:
     def _build_graph(self) -> StateGraph:
         """Build the LangGraph workflow."""
         # Initialize the LLM with tools
-        llm = ChatOpenAI(model=self.model_name, temperature=0)
+        llm = self._create_llm()
         llm_with_tools = llm.bind_tools(self._tools)
 
         # Define the agent node
