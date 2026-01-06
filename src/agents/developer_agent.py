@@ -96,12 +96,36 @@ Engineering quality bar:
 
         artifacts = {}
         try:
-            # Extract JSON from response
+            # Extract JSON from response - try multiple strategies
+            json_str = None
+            
+            # Strategy 1: Look for ```json blocks
             if "```json" in content:
-                json_str = content.split("```json")[1].split("```")[0]
-            elif "```" in content:
-                json_str = content.split("```")[1].split("```")[0]
-            else:
+                parts = content.split("```json")
+                for part in parts[1:]:
+                    if "```" in part:
+                        candidate = part.split("```")[0].strip()
+                        if candidate.startswith("{") or candidate.startswith("["):
+                            json_str = candidate
+                            break
+            
+            # Strategy 2: Look for generic ``` blocks that start with {
+            if json_str is None and "```" in content:
+                parts = content.split("```")
+                for i, part in enumerate(parts):
+                    stripped = part.strip()
+                    if (stripped.startswith("{") or stripped.startswith("[")) and (stripped.endswith("}") or stripped.endswith("]")):
+                        json_str = stripped
+                        break
+            
+            # Strategy 3: Find the first { and last } in the content
+            if json_str is None:
+                first_brace = content.find("{")
+                last_brace = content.rfind("}")
+                if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+                    json_str = content[first_brace:last_brace + 1]
+
+            if json_str is None:
                 json_str = content
 
             json_str = json_str.strip()
@@ -139,8 +163,30 @@ Engineering quality bar:
 
         except (Exception,) as e:
             logger.warning(f"Could not parse structured output: {e}")
-            # Try to extract code blocks
-            artifacts["code_blocks"] = self._extract_code_blocks(content)
+            # Try to extract code blocks and add them to context.code_artifacts
+            code_blocks = self._extract_code_blocks(content)
+            artifacts["code_blocks"] = code_blocks
+            
+            # Generate file paths for extracted code blocks and add to context
+            for i, block in enumerate(code_blocks):
+                lang = block.get("language", "txt")
+                ext_map = {
+                    "python": "py",
+                    "typescript": "ts",
+                    "javascript": "js",
+                    "yaml": "yaml",
+                    "json": "json",
+                    "dockerfile": "Dockerfile",
+                }
+                ext = ext_map.get(lang, lang)
+                if lang == "dockerfile":
+                    path = "Dockerfile" if i == 0 else f"Dockerfile.{i}"
+                else:
+                    path = f"src/generated_{i + 1}.{ext}"
+                context.code_artifacts[path] = block.get("code", "")
+            
+            if code_blocks:
+                logger.info(f"Extracted {len(code_blocks)} code blocks as fallback")
 
         return AgentMessage(
             from_agent=self.role,

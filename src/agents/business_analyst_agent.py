@@ -109,9 +109,14 @@ Required JSON shape (you may add additional fields, but keep these keys):
 Quality bar:
 - Backlog should be implementable by an engineering team without guesswork.
 - Acceptance criteria must be testable and unambiguous.
-- Do NOT optimize for brevity. Create as many Epics/Stories/Tasks as needed to fully cover the requirements.
-- Prefer deep detail over shallow coverage: include happy paths, edge cases, failures, security, operability, and observability work.
 - Ensure non-functional coverage: security, compliance posture (without making legal claims), operability, and observability.
+
+DEMO CONSTRAINTS (for faster execution):
+- Limit to a MAXIMUM of 3-5 Epics total.
+- Each Epic should have 2-3 User Stories maximum.
+- Each Story should have 1-2 Tasks maximum.
+- Keep acceptance criteria to 2-3 items per story.
+- Focus on the most impactful features rather than exhaustive coverage.
 """
 
     def set_ado_client(self, ado_client: Any) -> None:

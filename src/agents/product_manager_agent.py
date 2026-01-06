@@ -95,9 +95,12 @@ Required JSON shape (you may add additional fields, but keep these keys):
 }
 
 Quality bar:
-- Do NOT optimize for brevity. Include as many requirements as needed to cover the idea comprehensively.
-- If the product is complex, it is normal to produce dozens of requirements spanning functional + non-functional scope.
 - Include a mix of functional requirements and explicit non-functional requirements (security, availability, operability, observability).
+
+DEMO CONSTRAINTS (for faster execution):
+- Limit to a MAXIMUM of 5-7 high-level requirements total.
+- Focus on the most critical features that showcase the product vision.
+- Keep each requirement concise but complete.
 - Requirements must be consistent with each other and feasible for a small team to build over multiple milestones.
 """
 

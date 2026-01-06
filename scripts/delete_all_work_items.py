@@ -102,11 +102,12 @@ def _delete_test_plan_url(target: AdoTarget, plan_id: int) -> str:
     )
 
 
-def _delete_all_test_plans(client: httpx.Client, target: AdoTarget) -> tuple[int, int]:
+def _delete_all_test_plans(client: httpx.Client, target: AdoTarget, exclude_ids: set[int] | None = None) -> tuple[int, int]:
     """Delete all Test Plans in a project.
 
     Returns (deleted_count, total_count).
     """
+    exclude_ids = exclude_ids or set()
     resp = client.get(_list_test_plans_url(target))
     if resp.status_code >= 400:
         try:
@@ -118,6 +119,10 @@ def _delete_all_test_plans(client: httpx.Client, target: AdoTarget) -> tuple[int
     data = resp.json() or {}
     plans = data.get("value") or []
     plan_ids = [int(p["id"]) for p in plans if isinstance(p, dict) and "id" in p]
+    
+    # Filter out excluded plan IDs
+    if exclude_ids:
+        plan_ids = [pid for pid in plan_ids if pid not in exclude_ids]
 
     deleted = 0
     for plan_id in plan_ids:
@@ -210,7 +215,21 @@ def main() -> int:
         action="store_true",
         help="Also delete Azure DevOps Test Plans (disabled by default)",
     )
+    parser.add_argument(
+        "--exclude-ids",
+        type=str,
+        default="",
+        help="Comma-separated list of work item IDs to exclude from deletion (e.g., '369,370')",
+    )
     args = parser.parse_args()
+    
+    # Parse excluded IDs
+    exclude_ids: set[int] = set()
+    if args.exclude_ids:
+        for id_str in args.exclude_ids.split(","):
+            id_str = id_str.strip()
+            if id_str.isdigit():
+                exclude_ids.add(int(id_str))
 
     pat = _get_pat()
     if not pat:
@@ -224,6 +243,12 @@ def main() -> int:
 
     with httpx.Client(headers=_auth_headers(pat), timeout=30.0) as client:
         ids = _query_work_item_ids(client, target)
+        
+        # Filter out excluded IDs
+        if exclude_ids:
+            original_count = len(ids)
+            ids = [wid for wid in ids if wid not in exclude_ids]
+            print(f"Excluding {original_count - len(ids)} work items: {sorted(exclude_ids)}")
 
         print(f"Found {len(ids)} work items in {target.org}/{target.project}.")
         if not ids:
@@ -299,12 +324,15 @@ def main() -> int:
         if args.delete_test_plans:
             # Test Plans and Suites appear as work items but cannot be deleted via the WIT API.
             # Clean them up via the Test Plans REST API.
-            deleted_plans, total_plans = _delete_all_test_plans(client, target)
+            deleted_plans, total_plans = _delete_all_test_plans(client, target, exclude_ids)
             if total_plans:
                 print(f"Deleted {deleted_plans}/{total_plans} Test Plans.")
 
             # One more pass: deleting plans can unblock deletion of their associated work items.
             remaining = _query_work_item_ids(client, target)
+            # Filter out excluded IDs from remaining
+            if exclude_ids:
+                remaining = [wid for wid in remaining if wid not in exclude_ids]
             if remaining:
                 print(f"Remaining after Test Plan cleanup: {len(remaining)}. Retrying WIT delete...")
                 deleted2 = 0
