@@ -420,6 +420,43 @@ You MUST make actual tool calls - do not just output text describing work items!
 
 
 def create_architecture_agent() -> DeepAgent:
+
+# --- NEW: Test Plan Agent ---
+def create_test_plan_agent() -> DeepAgent:
+    """Create a test plan agent that creates ADO test plans and test cases."""
+    return DeepAgent(
+        role="QA Manager",
+        objective="Create test plans and test cases in Azure DevOps",
+        system_prompt="""You are a QA Manager who MUST create a test plan and test cases in Azure DevOps.
+
+YOUR TASK:
+1. Analyze the work items (Epics and Issues) provided
+2. Create a Test Plan using the ado_testplan_create_test_plan tool
+3. For each Epic/Issue, create a test suite and at least 1-2 test cases using ado_testplan_create_test_suite and ado_testplan_create_test_case
+
+CRITICAL: You MUST use the ADO tools to create actual test plans, suites, and cases. Do NOT just describe them.
+
+TOOLS TO USE:
+- ado_testplan_create_test_plan
+- ado_testplan_create_test_suite
+- ado_testplan_create_test_case
+
+WORKFLOW:
+1. Call ado_testplan_create_test_plan for the project 'testingmcp'
+2. For each Epic/Issue, call ado_testplan_create_test_suite (parent is root suite)
+3. For each suite, call ado_testplan_create_test_case with steps and acceptance criteria
+4. Summarize what was created with the returned IDs
+
+You MUST make actual tool calls - do not just output text describing test plans!
+""",
+        tools=get_all_tools(),
+        max_iterations=8,
+        confidence_threshold=ConfidenceLevel.MEDIUM,
+        enable_spawning=False,
+    )
+
+
+def create_architecture_agent() -> DeepAgent:
     """Create an architecture design agent."""
     return DeepAgent(
         role="Architect",
@@ -549,17 +586,23 @@ async def orchestrator_node(state: DeepPipelineState) -> dict:
     has_architecture = state.get("architecture") is not None
     has_code = state.get("code_artifacts") is not None
     
-    # Simple deterministic routing based on what's complete
-    # Flow: requirements → work_items (ADO) → architecture → development (GitHub)
+
+    # New: Add test_plan step after work_items
+    has_test_plan = state.get("test_plan") is not None
+
+    # New flow: requirements → work_items → test_plan → architecture → development
     if not has_requirements:
         next_agent = "requirements"
         reasoning = "Starting with requirements gathering"
     elif not has_work_items:
         next_agent = "work_items"
         reasoning = "Requirements done, creating work items in ADO"
+    elif not has_test_plan:
+        next_agent = "test_plan"
+        reasoning = "Work items created, now creating ADO test plan and test cases"
     elif not has_architecture:
         next_agent = "architecture"
-        reasoning = "Work items created, moving to architecture design"
+        reasoning = "Test plan created, moving to architecture design"
     elif not has_code:
         next_agent = "development"
         reasoning = "Architecture done, moving to code generation and GitHub push"
@@ -706,12 +749,74 @@ Call the tool for EACH work item you want to create.
         }
 
 
+
+# --- NEW: Test Plan Agent Node ---
+async def test_plan_agent_node(state: DeepPipelineState) -> dict:
+    """Test plan agent creates ADO test plans, suites, and test cases."""
+    agent = create_test_plan_agent()
+    work_items = state.get("work_items", {})
+    project_name = state.get("project_name", "new-project")
+
+    task = f"""Create a test plan and test cases in Azure DevOps for project: {project_name}
+
+WORK ITEMS:
+{work_items.get('description', 'No work items available')}
+
+IMPORTANT: You MUST use the ado_testplan_create_test_plan, ado_testplan_create_test_suite, and ado_testplan_create_test_case tools to create actual test plans and cases in ADO.
+The project name in ADO is 'testingmcp'.
+"""
+    try:
+        result = await agent.execute(task)
+        output = result.get("output", "")
+        decision_info = result.get("decision", {})
+        confidence = decision_info.get("confidence", "medium")
+        decision_type = decision_info.get("type", "complete")
+        iterations = result.get("iterations", 1)
+        tool_calls_made = result.get("tool_calls_made", 0)
+
+        test_plan = {
+            "description": output,
+            "confidence": confidence,
+            "iterations": iterations,
+            "tool_calls_made": tool_calls_made,
+        }
+
+        requires_approval = decision_type == "request_approval"
+
+        if tool_calls_made == 0:
+            logger.warning("Test plan agent did not call any ADO test plan tools!")
+
+        return {
+            "test_plan": test_plan,
+            "requires_approval": requires_approval,
+            "approval_reason": output if requires_approval else None,
+            "messages": [{
+                "role": "qa_manager",
+                "content": f"🧪 Test plan created (tool calls: {tool_calls_made})",
+                "details": output[:500] if output else "",
+                "confidence": confidence,
+            }],
+            "decision_history": [{
+                "agent": "test_plan",
+                "decision": decision_type,
+                "confidence": confidence,
+            }],
+        }
+    except Exception as e:
+        logger.error(f"Test plan agent failed: {e}")
+        return {
+            "errors": [f"Test plan error: {str(e)}"],
+        }
+
+
+# --- Existing: Architecture Agent Node ---
 async def architecture_agent_node(state: DeepPipelineState) -> dict:
     """Architecture agent designs system architecture."""
     agent = create_architecture_agent()
     
     requirements = state.get("requirements", {})
     work_items = state.get("work_items", {})
+    test_plan = state.get("test_plan", {})
     
     task = f"""Design system architecture for:
 
@@ -721,6 +826,9 @@ Requirements:
 Work Items:
 {work_items.get('description', 'No work items') if work_items else 'Skipped'}
 
+Test Plan:
+{test_plan.get('description', 'No test plan') if test_plan else 'Skipped'}
+
 Generate:
 1. High-level architecture
 2. Component diagrams (use Mermaid MCP tools)
@@ -729,7 +837,6 @@ Generate:
 
 For complex systems, spawn specialist sub-agents if needed.
 """
-    
     try:
         result = await agent.execute(task)
         
@@ -935,6 +1042,7 @@ def build_graph():
     builder.add_node("orchestrator", orchestrator_node)
     builder.add_node("requirements", requirements_agent_node)
     builder.add_node("work_items", work_items_agent_node)
+    builder.add_node("test_plan", test_plan_agent_node)
     builder.add_node("architecture", architecture_agent_node)
     builder.add_node("development", developer_agent_node)
     builder.add_node("approval", approval_node)
@@ -951,6 +1059,7 @@ def build_graph():
         {
             "requirements": "requirements",
             "work_items": "work_items",
+            "test_plan": "test_plan",
             "architecture": "architecture",
             "development": "development",
             "approval": "approval",
@@ -959,7 +1068,7 @@ def build_graph():
     )
     
     # Agents return to orchestrator (or approval)
-    for agent in ["requirements", "work_items", "architecture", "development"]:
+    for agent in ["requirements", "work_items", "test_plan", "architecture", "development"]:
         builder.add_conditional_edges(
             agent,
             route_after_agent,
