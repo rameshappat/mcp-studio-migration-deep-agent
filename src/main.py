@@ -1,7 +1,9 @@
 """Main entry point for the MCP Agent application."""
 
+import argparse
 import asyncio
 import logging
+import os
 
 from src.agents import AgentOrchestrator, create_github_agent
 from src.config import config
@@ -86,9 +88,145 @@ def demo_mode() -> None:
     print("  - src/agents/         - LangGraph agent and orchestrator")
     print("  - src/observability/  - LangSmith integration")
     print("  - tests/              - Test files")
+async def run_sdlc_pipeline(mode: str = "fixed", project_idea: str = None, project_name: str = None) -> None:
+    """Run the SDLC pipeline in fixed or deep agent mode.
+    
+    Args:
+        mode: 'fixed' for fixed graph, 'deep' for deep agents
+        project_idea: Description of the project to build
+        project_name: Name of the project
+    """
+    if not project_idea:
+        project_idea = input("Enter project idea: ").strip()
+    if not project_name:
+        project_name = input("Enter project name: ").strip()
+    
+    print(f"\n🚀 Starting SDLC Pipeline in {mode.upper()} mode")
+    print(f"Project: {project_name}")
+    print(f"Idea: {project_idea}\n")
+    
+    if mode == "deep":
+        # Use new dynamic deep agent graph
+        from src.studio_graph_deep import dynamic_graph
+        
+        # Configuration
+        require_approval = os.getenv("REQUIRE_APPROVAL", "false").lower() == "true"
+        confidence_threshold = os.getenv("CONFIDENCE_THRESHOLD", "medium")
+        
+        print(f"Configuration:")
+        print(f"  - Approval: {'Required' if require_approval else 'Autonomous'}")
+        print(f"  - Confidence threshold: {confidence_threshold}")
+        print(f"  - Self-correction: Enabled")
+        print(f"  - Agent spawning: Enabled")
+        print()
+        
+        initial_state = {
+            "project_idea": project_idea,
+            "project_name": project_name,
+            "require_approval": require_approval,
+            "confidence_threshold": confidence_threshold,
+            "max_pipeline_iterations": 20,
+        }
+        
+        config_dict = {
+            "configurable": {
+                "thread_id": f"sdlc-{project_name}",
+            }
+        }
+        
+        try:
+            result = await dynamic_graph.ainvoke(initial_state, config_dict)
+            
+            print("\n" + "="*60)
+            print("Pipeline Completed!")
+            print("="*60)
+            print(f"Status: {'✅ Success' if result.get('completed') else '⚠️ Incomplete'}")
+            print(f"Iterations: {result.get('pipeline_iteration', 0)}")
+            print(f"Agents executed: {len(result.get('agent_history', []))}")
+            
+            artifacts = result.get('artifacts', {})
+            print(f"\nArtifacts generated: {len(artifacts)}")
+            for artifact_type in artifacts.keys():
+                print(f"  - {artifact_type}")
+            
+        except KeyboardInterrupt:
+            print("\n\n⚠️ Pipeline interrupted by user")
+        except Exception as e:
+            logger.error(f"Pipeline error: {e}", exc_info=True)
+            print(f"\n❌ Error: {e}")
+    
+    else:
+        # Use original fixed graph
+        from src.studio_graph_agentic import graph
+        
+        print(f"Configuration:")
+        print(f"  - Approval: Required at each stage")
+        print(f"  - Flow: Fixed sequence")
+        print()
+        
+        initial_state = {
+            "project_idea": project_idea,
+            "project_name": project_name,
+        }
+        
+        config_dict = {
+            "configurable": {
+                "thread_id": f"sdlc-fixed-{project_name}",
+            }
+        }
+        
+        try:
+            result = await graph.ainvoke(initial_state, config_dict)
+            
+            print("\n" + "="*60)
+            print("Pipeline Completed!")
+            print("="*60)
+            print(f"Final stage: {result.get('current_stage', 'unknown')}")
+            
+            if result.get('requirements'):
+                print("✓ Requirements generated")
+            if result.get('epics'):
+                print(f"✓ Epics created: {len(result.get('epics', []))}")
+            if result.get('architecture'):
+                print("✓ Architecture designed")
+            if result.get('code_artifacts'):
+                print("✓ Code generated")
+            
+        except KeyboardInterrupt:
+            print("\n\n⚠️ Pipeline interrupted by user")
+        except Exception as e:
+            logger.error(f"Pipeline error: {e}", exc_info=True)
+            print(f"\n❌ Error: {e}")
 
 
 def main() -> None:
+    """Main entry point."""
+    parser = argparse.ArgumentParser(description="MCP Agent Application")
+    parser.add_argument(
+        "--mode",
+        choices=["agent", "sdlc-fixed", "sdlc-deep"],
+        default="agent",
+        help="Mode to run: agent (interactive), sdlc-fixed (fixed pipeline), sdlc-deep (deep agents)",
+    )
+    parser.add_argument(
+        "--project-idea",
+        type=str,
+        help="Project idea for SDLC pipeline",
+    )
+    parser.add_argument(
+        "--project-name",
+        type=str,
+        help="Project name for SDLC pipeline",
+    )
+    
+    args = parser.parse_args()
+    
+    if args.mode == "agent":
+        asyncio.run(run_agent())
+    elif args.mode == "sdlc-fixed":
+        asyncio.run(run_sdlc_pipeline("fixed", args.project_idea, args.project_name))
+    elif args.mode == "sdlc-deep":
+        asyncio.run(run_sdlc_pipeline("deep", args.project_idea, args.project_name
     """Main entry point."""
     asyncio.run(run_agent())
 

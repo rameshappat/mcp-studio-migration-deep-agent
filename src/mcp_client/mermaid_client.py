@@ -66,6 +66,16 @@ class MermaidMCPClient:
             ]
             return self._tools
 
+    async def connect(self) -> None:
+        """Connect to the Mermaid MCP server and list tools."""
+        await self.list_tools()
+        logger.info(f"Connected to Mermaid MCP. Found {len(self._tools)} tools.")
+        print(f"✅ Connected to Mermaid MCP. Found {len(self._tools)} tools.")
+
+    def get_tools(self) -> list[dict[str, Any]]:
+        """Get list of available tools (same as list_tools but synchronous, returns cached)."""
+        return self._tools
+
     def get_tool_names(self) -> list[str]:
         return [t["name"] for t in self._tools]
 

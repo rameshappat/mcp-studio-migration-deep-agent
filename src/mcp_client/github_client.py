@@ -67,6 +67,13 @@ class GitHubMCPClient:
     def get_tool_names(self) -> list[str]:
         return [tool.name for tool in self._tools]
 
+    def get_tools(self) -> list[dict]:
+        """Get list of available tools in dict format (matches ADO client interface)."""
+        return [
+            {"name": tool.name, "description": tool.description, "inputSchema": tool.inputSchema}
+            for tool in self._tools
+        ]
+
     def get_tool_by_name(self, name: str) -> MCPTool | None:
         for tool in self._tools:
             if tool.name == name:
