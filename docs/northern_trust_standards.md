@@ -5,6 +5,10 @@
 ### Cloud Platform
 - **Azure** - All infrastructure must be Azure-native
 
+### IAM and RBAC
+- **Azure Entra ID** - Primary security framework
+
+
 ### Frontend
 - **React JS** - Primary frontend framework
 
