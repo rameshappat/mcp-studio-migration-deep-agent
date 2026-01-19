@@ -1,0 +1,25 @@
+flowchart LR
+    style React fill:#61DAFB,stroke:#333,stroke-width:2px
+    style SpringBoot fill:#6DB33F,stroke:#333,stroke-width:2px
+    style AzureSQL fill:#F25022,stroke:#333,stroke-width:2px
+    style AzureAD fill:#0078D4,stroke:#333,stroke-width:2px
+    style AzureAppService fill:#00C4FF,stroke:#333,stroke-width:2px
+
+    React[React JS\n(Frontend)]
+    SpringBoot[Spring Boot\n(Backend Microservices)]
+    AzureSQL[Azure SQL Database\n(Data Storage)]
+    AzureAD[Azure Active Directory\n(Authentication)]
+    AzureAppService[Azure App Service\n(Hosting Environment)]
+    AzureFunctions[Azure Functions\n(Serverless Compute)]
+    AzureDevOps[Azure DevOps\n(CI/CD Pipeline)]
+    KYC_AML_Services[(KYC/AML Services)]
+    CRM_System[(CRM System)]
+
+    React -->|API calls| SpringBoot
+    SpringBoot -->|Authentication| AzureAD
+    SpringBoot -->|Data Management| AzureSQL
+    SpringBoot -->|Serverless Functions| AzureFunctions
+    SpringBoot -->|Integrate| KYC_AML_Services
+    SpringBoot -->|Sync Data| CRM_System
+    AzureDevOps -.->|CI/CD Pipeline| AzureAppService
+    AzureAppService -->|Host| SpringBoot

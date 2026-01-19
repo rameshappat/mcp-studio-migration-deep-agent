@@ -1,0 +1,9 @@
+{
+  "graphs": {
+    "sdlc_pipeline_fixed": "./src/studio_graph.py:graph",
+    "sdlc_pipeline_autonomous": "./src/studio_graph_autonomous.py:graph"
+  },
+  "env": ".env",
+  "python_version": "3.12",
+  "dependencies": ["."]
+}

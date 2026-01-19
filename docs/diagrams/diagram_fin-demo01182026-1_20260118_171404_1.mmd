@@ -1,0 +1,32 @@
+graph TD;
+    client[React JS Client] -->|HTTPS| gateway[API Gateway];
+    gateway --> auth[Authentication Service];
+    auth --> directory[ADB2C/ Azure AD];
+    gateway --> users[User Management Microservice];
+    gateway --> kyc[KYC/AML Microservice];
+    gateway --> crm[CRM Integration Microservice];
+    users --> db[(Azure SQL Database)];
+    kyc --> external_kyc[(External KYC/AML)];
+    crm --> external_crm[(External CRM)];
+    gateway -->|Secured API| app[App Service];
+    app --> function[Azure Functions];
+    function --> queue[(Azure Queue)];
+    queue --> function;
+    app --> blob[(Azure Blob Storage)];
+    directory -->|OAuth 2.0 & OpenID Connect| app;
+    app -->|Data Encryption| db;
+    db -->|Backup & Restore| backup[(Backup Storage)];
+    subgraph Azure Cloud
+        gateway
+        auth
+        directory
+        users
+        kyc
+        crm
+        app
+        function
+        queue
+        blob
+        db
+        backup
+    end
