@@ -695,11 +695,33 @@ async def requirements_agent_node(state: DeepPipelineState) -> dict:
         confidence = decision_info.get("confidence", "medium")
         decision_type = decision_info.get("type", "complete")
         iterations = result.get("iterations", 1)
+        tool_calls = result.get("tool_calls", [])
+        
+        # CHECK FOR TOOL FAILURES
+        failed_tool_calls = []
+        for tool_call in tool_calls:
+            tool_name = tool_call.get("tool", "")
+            tool_result = tool_call.get("result", {})
+            
+            if isinstance(tool_result, dict):
+                if "text" in tool_result and "error" in tool_result["text"].lower():
+                    logger.error(f"❌ MCP TOOL ERROR in requirements_agent: {tool_name}")
+                    logger.error(f"   Error: {tool_result['text'][:200]}")
+                    logger.error(f"   Args: {tool_call.get('args', {})}")
+                    failed_tool_calls.append({
+                        "tool": tool_name,
+                        "error": tool_result["text"],
+                        "args": tool_call.get("args", {})
+                    })
+        
+        if failed_tool_calls:
+            logger.warning(f"⚠️  Requirements agent had {len(failed_tool_calls)} failed tool calls")
         
         requirements = {
             "description": output,
             "confidence": confidence,
             "iterations": iterations,
+            "failed_tool_calls": failed_tool_calls,
         }
         
         # Human-in-the-loop: Request approval if agent decides it needs review
@@ -711,7 +733,7 @@ async def requirements_agent_node(state: DeepPipelineState) -> dict:
             "approval_reason": output if requires_approval else None,
             "messages": [{
                 "role": "requirements_analyst",
-                "content": "📋 Requirements generated",
+                "content": "📋 Requirements generated" + (f" ({len(failed_tool_calls)} tool calls failed)" if failed_tool_calls else ""),
                 "details": output[:500] if output else "",
                 "confidence": confidence,
             }],
@@ -719,12 +741,28 @@ async def requirements_agent_node(state: DeepPipelineState) -> dict:
                 "agent": "requirements",
                 "decision": decision_type,
                 "confidence": confidence,
+                "failed_tools": len(failed_tool_calls),
             }],
         }
     except Exception as e:
-        logger.error(f"Requirements agent failed: {e}")
+        logger.error(f"❌ EXCEPTION in requirements_agent_node: {e}")
+        logger.error(f"   Exception type: {type(e).__name__}")
+        
+        # Log full traceback
+        import traceback
+        logger.error("   Full traceback:")
+        for line in traceback.format_exc().split('\n'):
+            if line.strip():
+                logger.error(f"   {line}")
+        
         return {
             "errors": [f"Requirements error: {str(e)}"],
+            "exception_type": type(e).__name__,
+            "traceback": traceback.format_exc(),
+            "requirements": {
+                "description": f"Failed: {str(e)}",
+                "confidence": "low",
+            },
         }
 
 
@@ -780,6 +818,24 @@ Call it 7-10 times NOW to create work items!
         decision_type = decision_info.get("type", "complete")
         iterations = result.get("iterations", 1)
         tool_calls_made = result.get("tool_calls_made", 0)
+        tool_calls = result.get("tool_calls", [])
+        
+        # CHECK FOR TOOL CALL FAILURES
+        failed_tool_calls = []
+        for tool_call in tool_calls:
+            tool_name = tool_call.get("tool", "")
+            tool_result = tool_call.get("result", {})
+            
+            if isinstance(tool_result, dict):
+                if "text" in tool_result and "error" in tool_result["text"].lower():
+                    logger.error(f"❌ MCP TOOL ERROR in work_items_agent: {tool_name}")
+                    logger.error(f"   Error: {tool_result['text'][:200]}")
+                    logger.error(f"   Args: {tool_call.get('args', {})}")
+                    failed_tool_calls.append({
+                        "tool": tool_name,
+                        "error": tool_result["text"],
+                        "args": tool_call.get("args", {})
+                    })
         
         # Query ADO to get recently created work items (to get IDs for test case creation)
         created_ids = []
@@ -793,10 +849,23 @@ Call it 7-10 times NOW to create work items!
             matches = re.findall(id_pattern, output)
             created_ids = [int(id_str) for id_str in matches]
             
-            logger.info(f"📋 Work Items Agent: Parsed {len(created_ids)} work item IDs from output")
-            logger.info(f"📋 Work Items IDs: {created_ids}")
+            if created_ids:
+                logger.info(f"📋 Work Items Agent: Parsed {len(created_ids)} work item IDs from output")
+                logger.info(f"📋 Work Items IDs: {created_ids}")
+            else:
+                logger.error("❌ CRITICAL: No work item IDs found in output!")
+                logger.error(f"   Tool calls made: {tool_calls_made}")
+                logger.error(f"   Failed tool calls: {len(failed_tool_calls)}")
+                logger.error(f"   Output length: {len(output)}")
+                logger.error(f"   Output preview: {output[:500]}")
+                
         except Exception as parse_error:
-            logger.warning(f"Could not parse work item IDs from output: {parse_error}")
+            logger.error(f"❌ Exception parsing work item IDs: {parse_error}")
+            import traceback
+            logger.error("   Traceback:")
+            for line in traceback.format_exc().split('\n'):
+                if line.strip():
+                    logger.error(f"   {line}")
         
         work_items = {
             "description": output,
@@ -804,15 +873,20 @@ Call it 7-10 times NOW to create work items!
             "iterations": iterations,
             "tool_calls_made": tool_calls_made,
             "created_ids": created_ids,  # Store IDs for test case creation
+            "failed_tool_calls": failed_tool_calls,
         }
         
         requires_approval = decision_type == "request_approval"
         
         # Check if tools were actually called
         if tool_calls_made == 0:
-            logger.warning("Work items agent did not call any ADO tools!")
+            logger.error("❌ CRITICAL: Work items agent did not call any ADO tools!")
+            logger.error("   This means no work items were created!")
+        elif len(created_ids) == 0:
+            logger.error("❌ CRITICAL: Tools were called but no work items were created!")
+            logger.error(f"   Tool calls: {tool_calls_made}, Failed: {len(failed_tool_calls)}")
         
-        logger.info(f"\ud83d\udd0e Work Items Agent: Returning state with created_ids = {created_ids}")
+        logger.info(f"🔎 Work Items Agent: Returning state with created_ids = {created_ids}")
         
         return {
             "work_items": work_items,
@@ -832,14 +906,142 @@ Call it 7-10 times NOW to create work items!
             }],
         }
     except Exception as e:
-        logger.error(f"Work items agent failed: {e}")
+        logger.error(f"❌ EXCEPTION in work_items_agent_node: {e}")
+        logger.error(f"   Exception type: {type(e).__name__}")
+        
+        # Log full traceback
+        import traceback
+        logger.error("   Full traceback:")
+        for line in traceback.format_exc().split('\n'):
+            if line.strip():
+                logger.error(f"   {line}")
+        
         consecutive_failures = state.get("consecutive_failures", {})
         consecutive_failures["work_items"] = consecutive_failures.get("work_items", 0) + 1
+        
         return {
             "errors": [f"Work items error: {str(e)}"],
             "consecutive_failures": consecutive_failures,
+            "exception_type": type(e).__name__,
+            "traceback": traceback.format_exc(),
+            "work_items": {
+                "created_ids": [],  # Ensure downstream nodes don't fail
+                "description": f"Failed: {str(e)}",
+            },
         }
 
+
+async def _create_test_cases_directly(ado_client, work_items_details, project, test_plan_id, test_suite_id):
+    """Direct fallback to create test cases when Deep Agent fails to call tools.
+    
+    This bypasses the autonomous Deep Agent and directly calls MCP tools.
+    """
+    logger.warning("🔧 DIRECT TEST CASE CREATION (Fallback Mode)")
+    
+    created_cases = []
+    failed_tool_calls = []
+    
+    for idx, wi in enumerate(work_items_details, 1):
+        wi_id = wi.get("id")
+        wi_title = wi.get("title", "").strip()
+        wi_desc = wi.get("description", "").strip()
+        wi_type = wi.get("work_item_type", "Feature")
+        wi_ac = wi.get("acceptance_criteria", "").strip()
+        
+        # Skip if this looks like it's already a test case
+        if wi_type == "Test Case" or wi_title.lower().startswith("test:"):
+            logger.warning(f"  [{idx}/{len(work_items_details)}] Skipping WI {wi_id} - appears to be a test case already")
+            continue
+        
+        # If title is empty, skip
+        if not wi_title:
+            logger.error(f"  [{idx}/{len(work_items_details)}] Skipping WI {wi_id} - no title found")
+            continue
+        
+        logger.info(f"  [{idx}/{len(work_items_details)}] Creating test for WI {wi_id}: {wi_title}")
+        
+        # Generate meaningful test steps based on work item details
+        feature_desc = wi_title
+        acceptance = wi_ac if wi_ac else "All requirements met"
+        
+        steps = f"""1. Setup test environment|Test environment is ready and accessible
+2. Navigate to {feature_desc}|{feature_desc} page/feature loads successfully
+3. Verify initial state|All required UI elements and data are present
+4. Execute main functionality|{feature_desc} works as documented
+5. Validate acceptance criteria|{acceptance[:150]}
+6. Test error handling|Proper error messages displayed for invalid inputs
+7. Verify data persistence|Changes are saved and retrievable correctly"""
+        
+        # Create descriptive test title
+        test_title = f"Verify {wi_title}"
+        
+        try:
+            # Create test case
+            logger.info(f"      Calling testplan_create_test_case...")
+            logger.info(f"      Title: {test_title}")
+            result = await ado_client.call_tool('testplan_create_test_case', {
+                'project': project,
+                'title': test_title,
+                'steps': steps,
+                'priority': 2,
+                'tests_work_item_id': wi_id
+            }, timeout=60)
+            
+            # Check for error
+            if isinstance(result, dict) and "error" in result:
+                logger.error(f"      ❌ Failed to create test case: {result.get('text', 'Unknown error')}")
+                failed_tool_calls.append({
+                    "tool": "testplan_create_test_case",
+                    "error": result.get("text"),
+                    "args": {"wi_id": wi_id, "title": wi_title}
+                })
+                continue
+            
+            test_case_id = result.get("id")
+            if not test_case_id:
+                logger.error(f"      ❌ No test case ID returned: {result}")
+                continue
+            
+            logger.info(f"      ✅ Created test case: {test_case_id}")
+            
+            # Add to suite
+            logger.info(f"      Adding to suite {test_suite_id}...")
+            result2 = await ado_client.call_tool('testplan_add_test_cases_to_suite', {
+                'project': project,
+                'planId': test_plan_id,
+                'suiteId': test_suite_id,
+                'testCaseIds': str(test_case_id)  # MUST be string!
+            }, timeout=60)
+            
+            if isinstance(result2, dict) and "error" in result2:
+                logger.error(f"      ❌ Failed to add to suite: {result2.get('text', 'Unknown error')}")
+                failed_tool_calls.append({
+                    "tool": "testplan_add_test_cases_to_suite",
+                    "error": result2.get("text"),
+                    "args": {"test_case_id": test_case_id}
+                })
+            else:
+                logger.info(f"      ✅ Added to suite")
+            
+            created_cases.append({
+                "test_case_id": test_case_id,
+                "title": test_title,
+                "plan_id": test_plan_id,
+                "suite_id": test_suite_id,
+                "result": "success",
+                "work_item_id": wi_id
+            })
+            
+        except Exception as e:
+            logger.error(f"      ❌ Exception: {e}")
+            failed_tool_calls.append({
+                "tool": "direct_creation",
+                "error": str(e),
+                "args": {"wi_id": wi_id}
+            })
+    
+    logger.info(f"🔧 Direct creation complete: {len(created_cases)} created, {len(failed_tool_calls)} failed")
+    return created_cases, failed_tool_calls
 
 
 # --- NEW: Test Plan Agent Node ---
@@ -882,13 +1084,19 @@ async def test_plan_agent_node(state: DeepPipelineState) -> dict:
         try:
             wi_details = await ado_client.get_work_item(work_item_id=wi_id)
             fields = wi_details.get("fields", {})
-            work_items_details.append({
+            
+            wi_data = {
                 "id": wi_id,
                 "title": fields.get("System.Title", ""),
                 "description": fields.get("System.Description", ""),
                 "work_item_type": fields.get("System.WorkItemType", ""),
                 "acceptance_criteria": fields.get("Microsoft.VSTS.Common.AcceptanceCriteria", ""),
-            })
+            }
+            
+            # Log extracted data for debugging
+            logger.info(f"   WI {wi_id}: Type={wi_data['work_item_type']}, Title='{wi_data['title'][:50]}...'")
+            
+            work_items_details.append(wi_data)
         except Exception as e:
             logger.error(f"Failed to fetch work item {wi_id}: {e}")
     
@@ -897,91 +1105,60 @@ async def test_plan_agent_node(state: DeepPipelineState) -> dict:
     test_suite_id = int(os.getenv("SDLC_TESTSUITE_ID", "370"))
     project = os.getenv("AZURE_DEVOPS_PROJECT", "testingmcp")
     
-    # Build task with full context for the Deep Agent
-    task = f"""⚠️ IMMEDIATE ACTION REQUIRED: Create test cases using tools NOW!
-
-PARAMETERS YOU NEED:
-- project: "{project}"
-- test_plan_id: {test_plan_id}
-- test_suite_id: {test_suite_id}
-
-WORK ITEMS TO TEST ({len(work_items_details)} total):
-{json.dumps(work_items_details, indent=2)}
-
-YOUR FIRST RESPONSE MUST INCLUDE TOOL CALLS!
-
-For EACH work item above, you MUST:
-1. Call testplan_create_test_case with:
-   {{"project": "{project}", "title": "Test: [work item title]", "steps": "1. Action|Expected\\n2. Action|Expected\\n3. Action|Expected\\n4. Action|Expected\\n5. Action|Expected\\n6. Action|Expected"}}
-
-2. Call testplan_add_test_cases_to_suite with:
-   {{"project": "{project}", "test_plan_id": {test_plan_id}, "test_suite_id": {test_suite_id}, "test_case_ids": [test_case_id_from_step_1]}}
-
-Example for first work item - START WITH THIS PATTERN:
-Tool: testplan_create_test_case
-Parameters: {{"project": "{project}", "title": "Test: [exact title from JSON above]", "steps": "1. Navigate to feature page|Page loads with form\\n2. Enter test data|Fields accept input\\n3. Submit form|Success message displays\\n4. Verify in database|Record created\\n5. Check email notification|Email received\\n6. Validate UI state|Form resets"}}
-
-DO NOT EXPLAIN - CALL THE TOOLS NOW IN THIS RESPONSE!
-"""
+    # SKIP DEEP AGENT - DIRECTLY CREATE TEST CASES
+    logger.warning("⚠️  BYPASSING DEEP AGENT - CREATING TEST CASES DIRECTLY")
+    logger.warning(f"   Creating {len(work_items_details)} test cases via direct MCP/REST calls...")
+    
+    created_cases, failed_tool_calls = await _create_test_cases_directly(
+        ado_client, work_items_details, project, test_plan_id, test_suite_id
+    )
+    
+    # COMPREHENSIVE LOGGING OF RESULTS
+    if len(created_cases) == 0:
+        logger.error("❌ CRITICAL: No test cases created!")
+        logger.error(f"   Failed operations: {len(failed_tool_calls)}")
+        
+        if failed_tool_calls:
+            logger.error("\n   Failed tool details:")
+            for failure in failed_tool_calls:
+                logger.error(f"   - Tool: {failure['tool']}")
+                logger.error(f"     Error: {failure['error'][:200]}")
+    else:
+        logger.info(f"✅ Successfully created {len(created_cases)} test cases")
+        logger.info(f"   Test case IDs: {[tc['test_case_id'] for tc in created_cases]}")
+        if failed_tool_calls:
+            logger.warning(f"⚠️  {len(failed_tool_calls)} operations failed")
     
     try:
-        result = await agent.execute(task)
-        
-        output = result.get("output", "")
-        decision_info = result.get("decision", {})
-        confidence = decision_info.get("confidence", "medium")
-        iterations = result.get("iterations", 1)
-        tool_calls = result.get("tool_calls", [])
-        
-        logger.info(f"🧪 Test Plan Agent completed: {iterations} iterations, {len(tool_calls)} tool calls")
-        logger.info(f"🧪 Decision: {decision_info.get('type', 'unknown')} (confidence: {confidence})")
-        
-        # Extract test case IDs from tool results
-        created_cases = []
-        for tool_call in tool_calls:
-            tool_name = tool_call.get("tool", "")
-            logger.info(f"  Tool called: {tool_name}")
-            if "create_test_case" in tool_name:
-                test_case_result = tool_call.get("result", {})
-                if test_case_id := test_case_result.get("id"):
-                    created_cases.append({
-                        "test_case_id": test_case_id,
-                        "title": test_case_result.get("fields", {}).get("System.Title", ""),
-                        "plan_id": test_plan_id,
-                        "suite_id": test_suite_id,
-                        "result": "success"
-                    })
-                    logger.info(f"  ✅ Test case created: ID {test_case_id}")
-        
-        if len(created_cases) == 0:
-            logger.warning(f"⚠️ No test cases created! Tool calls: {len(tool_calls)}, Output length: {len(output)}")
-            logger.warning(f"⚠️ Agent output preview: {output[:200]}")
-        
-        logger.info(f"✅ Deep Agent created {len(created_cases)} test cases in {iterations} iterations")
-        
-        # Human-in-the-loop: Request approval if agent decides it needs review
-        requires_approval = decision_info.get("type") == "request_approval"
-        
         return {
             "test_cases": created_cases,
             "test_plan_complete": True,
-            "requires_approval": requires_approval,
-            "approval_reason": output if requires_approval else None,
+            "failed_tool_calls": failed_tool_calls,
             "messages": [{
                 "role": "qa_manager",
-                "content": f"🧪 Created {len(created_cases)} test cases in ADO Test Plan {test_plan_id}, Suite {test_suite_id}",
-                "details": output[:500] if output else "",
-                "confidence": confidence,
+                "content": f"🧪 Created {len(created_cases)} test cases in ADO" + 
+                          (f" ({len(failed_tool_calls)} failures)" if failed_tool_calls else ""),
             }],
             "decision_history": [{
                 "agent": "test_plan",
-                "decision": decision_info.get("type", "complete"),
-                "confidence": confidence,
+                "decision": "complete",
+                "confidence": "high",
+                "failed_tools": len(failed_tool_calls),
+                "test_cases_created": len(created_cases),
             }],
         }
         
     except Exception as e:
-        logger.error(f"Test plan agent failed: {e}")
+        logger.error(f"❌ EXCEPTION in test_plan_agent_node: {e}")
+        logger.error(f"   Exception type: {type(e).__name__}")
+        
+        # Log full traceback
+        import traceback
+        logger.error("   Full traceback:")
+        for line in traceback.format_exc().split('\n'):
+            if line.strip():
+                logger.error(f"   {line}")
+        
         # Increment consecutive failures
         consecutive_failures = state.get("consecutive_failures", {})
         consecutive_failures["test_plan"] = consecutive_failures.get("test_plan", 0) + 1
@@ -991,6 +1168,8 @@ DO NOT EXPLAIN - CALL THE TOOLS NOW IN THIS RESPONSE!
             "test_plan_complete": True,
             "consecutive_failures": consecutive_failures,
             "errors": [f"Test plan error: {str(e)}"],
+            "exception_type": type(e).__name__,
+            "traceback": traceback.format_exc(),
             "messages": [{
                 "role": "qa_manager",
                 "content": f"❌ Test case creation failed: {str(e)}",
@@ -1081,6 +1260,27 @@ For complex systems, spawn specialist sub-agents if needed.
         decision_type = decision_info.get("type", "complete")
         iterations = result.get("iterations", 1)
         spawned_count = result.get("spawned_agents", 0)
+        tool_calls = result.get("tool_calls", [])
+        
+        # CHECK FOR TOOL FAILURES (especially Mermaid diagram generation)
+        failed_tool_calls = []
+        for tool_call in tool_calls:
+            tool_name = tool_call.get("tool", "")
+            tool_result = tool_call.get("result", {})
+            
+            if isinstance(tool_result, dict):
+                if "text" in tool_result and "error" in tool_result["text"].lower():
+                    logger.error(f"❌ MCP TOOL ERROR in architecture_agent: {tool_name}")
+                    logger.error(f"   Error: {tool_result['text'][:200]}")
+                    logger.error(f"   Args: {tool_call.get('args', {})}")
+                    failed_tool_calls.append({
+                        "tool": tool_name,
+                        "error": tool_result["text"],
+                        "args": tool_call.get("args", {})
+                    })
+        
+        if failed_tool_calls:
+            logger.warning(f"⚠️  Architecture agent had {len(failed_tool_calls)} failed tool calls")
         
         # If max iterations reached, force completion and move to developer
         if iterations >= 5 or decision_type == "max_iterations":
@@ -1136,6 +1336,7 @@ For complex systems, spawn specialist sub-agents if needed.
             "spawned_agents": spawned_count,
             "saved_to": arch_doc_path,
             "diagrams": saved_diagrams,
+            "failed_tool_calls": failed_tool_calls,
         }
         
         requires_approval = decision_type == "request_approval"
@@ -1146,7 +1347,8 @@ For complex systems, spawn specialist sub-agents if needed.
             "approval_reason": output if requires_approval else None,
             "messages": [{
                 "role": "architect",
-                "content": f"🏗️ Architecture designed and saved to {arch_doc_path}",
+                "content": f"🏗️ Architecture designed and saved to {arch_doc_path}" + 
+                          (f" ({len(failed_tool_calls)} tool calls failed)" if failed_tool_calls else ""),
                 "details": output[:500] if output else "",
                 "confidence": confidence,
                 "spawned": spawned_count,
@@ -1156,12 +1358,29 @@ For complex systems, spawn specialist sub-agents if needed.
                 "agent": "architecture",
                 "decision": decision_type,
                 "confidence": confidence,
+                "failed_tools": len(failed_tool_calls),
             }],
         }
     except Exception as e:
-        logger.error(f"Architecture agent failed: {e}")
+        logger.error(f"❌ EXCEPTION in architecture_agent_node: {e}")
+        logger.error(f"   Exception type: {type(e).__name__}")
+        
+        # Log full traceback
+        import traceback
+        logger.error("   Full traceback:")
+        for line in traceback.format_exc().split('\n'):
+            if line.strip():
+                logger.error(f"   {line}")
+        
         return {
             "errors": [f"Architecture error: {str(e)}"],
+            "exception_type": type(e).__name__,
+            "traceback": traceback.format_exc(),
+            "architecture": {
+                "description": f"Failed: {str(e)}",
+                "confidence": "low",
+                "saved_to": "",
+            },
         }
 
 
@@ -1321,6 +1540,8 @@ CRITICAL RULES:
                     
                     # Step 3: Push files
                     pushed_files = []
+                    failed_github_operations = []
+                    
                     for file_path, file_content in files:
                         try:
                             file_path = file_path.strip()
@@ -1356,7 +1577,7 @@ CRITICAL RULES:
                             logger.info(f"  Pushing {file_path} ({len(file_content)} chars)")
                             logger.info(f"    Content preview: {file_content[:100]}...")
                             
-                            await github_client.call_tool(
+                            result = await github_client.call_tool(
                                 "create_or_update_file",
                                 {
                                     "owner": owner,
@@ -1367,12 +1588,33 @@ CRITICAL RULES:
                                     "branch": target_branch
                                 }
                             )
-                            pushed_files.append(file_path)
-                            logger.info(f"  ✅ Pushed: {file_path}")
+                            
+                            # CHECK FOR MCP ERROR RESPONSE
+                            if isinstance(result, dict) and "text" in result and "error" in result["text"].lower():
+                                logger.error(f"  ❌ GitHub MCP ERROR for {file_path}:")
+                                logger.error(f"      {result['text']}")
+                                failed_github_operations.append({
+                                    "file": file_path,
+                                    "operation": "create_or_update_file",
+                                    "error": result["text"]
+                                })
+                            else:
+                                pushed_files.append(file_path)
+                                logger.info(f"  ✅ Pushed: {file_path}")
+                                
                         except Exception as e:
-                            logger.error(f"  ❌ Failed to push {file_path}: {e}")
+                            logger.error(f"  ❌ Exception pushing {file_path}: {e}")
+                            failed_github_operations.append({
+                                "file": file_path,
+                                "operation": "create_or_update_file",
+                                "error": str(e)
+                            })
                     
                     logger.info(f"✅ Pushed {len(pushed_files)}/{len(files)} files to GitHub")
+                    if failed_github_operations:
+                        logger.error(f"❌ {len(failed_github_operations)} GitHub operations failed")
+                        for failure in failed_github_operations[:3]:  # Log first 3
+                            logger.error(f"   - {failure['file']}: {failure['error'][:100]}")
                     
                     # Step 4: Create PR (only if using feature branch)
                     pr_url = ""
@@ -1399,7 +1641,8 @@ CRITICAL RULES:
                         "pull_request_url": pr_url,
                         "branch": target_branch,
                         "files_pushed": len(pushed_files),
-                        "total_files": len(files)
+                        "total_files": len(files),
+                        "failed_operations": failed_github_operations,
                     }
                     
             except Exception as e:
@@ -1452,12 +1695,21 @@ CRITICAL RULES:
             }],
         }
     except Exception as e:
-        logger.error(f"Developer agent failed: {e}")
+        logger.error(f"❌ EXCEPTION in developer_agent_node: {e}")
+        logger.error(f"   Exception type: {type(e).__name__}")
+        
+        # Log full traceback
         import traceback
-        traceback.print_exc()
+        logger.error("   Full traceback:")
+        for line in traceback.format_exc().split('\n'):
+            if line.strip():
+                logger.error(f"   {line}")
+        
         return {
             "code_artifacts": {"error": str(e), "failed": True},  # CRITICAL: Set this so orchestrator knows we tried
             "errors": [f"Development error: {str(e)}"],
+            "exception_type": type(e).__name__,
+            "traceback": traceback.format_exc(),
             "messages": [{
                 "role": "developer",
                 "content": f"❌ Code generation failed: {str(e)}",

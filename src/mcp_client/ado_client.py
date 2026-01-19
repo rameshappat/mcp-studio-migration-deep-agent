@@ -121,35 +121,60 @@ class AzureDevOpsMCPClient:
         """Get list of available tool names."""
         return [tool["name"] for tool in self._tools]
 
-    async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> Any:
-        """Call a tool on the Azure DevOps MCP server.
+    async def call_tool(self, tool_name: str, arguments: dict[str, Any], timeout: int = 60) -> Any:
+        """Call a tool on the Azure DevOps MCP server with timeout.
 
         Args:
             tool_name: Name of the tool to call.
             arguments: Arguments to pass to the tool.
+            timeout: Timeout in seconds (default: 60).
 
         Returns:
-            The result from the tool execution.
+            The result from the tool execution, or error dict if timeout.
         """
         # Add project to arguments if not present and we have one
         if "project" not in arguments and self.project:
             arguments["project"] = self.project
 
-        logger.info(f"Calling ADO tool: {tool_name}")
+        logger.info(f"Calling ADO tool: {tool_name} (timeout: {timeout}s)")
 
-        async with self._get_session() as session:
-            result = await session.call_tool(tool_name, arguments)
+        try:
+            async with self._get_session() as session:
+                result = await asyncio.wait_for(
+                    session.call_tool(tool_name, arguments),
+                    timeout=timeout
+                )
+                
+                # Parse the result content
+                if result.content:
+                    content = result.content[0]
+                    if hasattr(content, 'text'):
+                        try:
+                            return json.loads(content.text)
+                        except json.JSONDecodeError:
+                            return {"text": content.text}
+        except asyncio.TimeoutError:
+            error_msg = f"MCP tool call timed out after {timeout}s"
+            logger.error(f"❌ TIMEOUT: {tool_name} - {error_msg}")
+            logger.warning(f"🔄 Attempting REST API fallback for {tool_name}")
             
-            # Parse the result content
-            if result.content:
-                content = result.content[0]
-                if hasattr(content, 'text'):
-                    try:
-                        return json.loads(content.text)
-                    except json.JSONDecodeError:
-                        return {"text": content.text}
+            # Try REST API fallback for test plan operations
+            if "testplan" in tool_name.lower():
+                return await self._rest_fallback(tool_name, arguments)
             
-            return result
+            return {"text": f"MCP error: {error_msg}", "error": "timeout"}
+        except Exception as e:
+            error_msg = f"MCP tool call failed: {str(e)}"
+            logger.error(f"❌ ERROR: {tool_name} - {error_msg}")
+            logger.warning(f"🔄 Attempting REST API fallback for {tool_name}")
+            
+            # Try REST API fallback for test plan operations
+            if "testplan" in tool_name.lower():
+                return await self._rest_fallback(tool_name, arguments)
+            
+            return {"text": f"MCP error: {error_msg}", "error": str(e)}
+            
+        return result
 
     async def _call_first_available_tool(
         self, tool_names: list[str], arguments: dict[str, Any]
@@ -292,6 +317,204 @@ class AzureDevOpsMCPClient:
         # Keep the pipeline best-effort: return an error-shaped payload instead of
         # raising, so callers can display actionable output.
         return {"text": f"REST fallback failed to create Test Plan: {last_error}"}
+
+    async def _rest_fallback(self, tool_name: str, arguments: dict[str, Any]) -> Any:
+        """REST API fallback for test plan operations when MCP fails.
+        
+        Note: Requires PAT token to be set via environment variable:
+        - AZURE_DEVOPS_PAT
+        - AZURE_DEVOPS_EXT_PAT  
+        - ADO_MCP_AUTH_TOKEN
+        
+        If using interactive authentication without PAT, REST fallback is not available.
+        """
+        logger.info(f"🔄 REST API fallback for {tool_name}")
+        
+        if not self._pat:
+            error_msg = "REST fallback requires PAT token. Set AZURE_DEVOPS_PAT environment variable. Interactive auth mode cannot use REST fallback."
+            logger.error(f"❌ {error_msg}")
+            return {"text": f"MCP error: {error_msg}", "error": "no_pat"}
+        
+        try:
+            # Route to appropriate REST method
+            if "create_test_case" in tool_name:
+                return await self._rest_create_test_case(arguments)
+            elif "add_test_cases_to_suite" in tool_name:
+                return await self._rest_add_test_cases_to_suite(arguments)
+            elif "list_test_cases" in tool_name:
+                return await self._rest_list_test_cases(arguments)
+            elif "create_test_suite" in tool_name:
+                return await self._rest_create_test_suite(arguments)
+            else:
+                logger.warning(f"⚠️ No REST fallback implemented for {tool_name}")
+                return {"text": f"MCP error: No REST fallback for {tool_name}", "error": "not_implemented"}
+        except Exception as e:
+            logger.error(f"❌ REST fallback failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return {"text": f"REST API error: {str(e)}", "error": "rest_failed"}
+
+    async def _rest_create_test_case(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Create test case via REST API."""
+        project = args.get("project", self.project)
+        title = args.get("title", "")
+        steps = args.get("steps", "")
+        
+        if not project or not title:
+            return {"text": "REST error: Missing required fields", "error": "missing_fields"}
+        
+        token = base64.b64encode(f":{self._pat}".encode("utf-8")).decode("utf-8")
+        headers = {
+            "Authorization": f"Basic {token}",
+            "Content-Type": "application/json-patch+json",
+        }
+        
+        # Build work item payload
+        operations = [
+            {"op": "add", "path": "/fields/System.Title", "value": title},
+            {"op": "add", "path": "/fields/System.WorkItemType", "value": "Test Case"},
+        ]
+        
+        if steps:
+            # Format steps for ADO
+            formatted_steps = self._format_test_steps(steps)
+            operations.append({"op": "add", "path": "/fields/Microsoft.VSTS.TCM.Steps", "value": formatted_steps})
+        
+        if args.get("priority"):
+            operations.append({"op": "add", "path": "/fields/Microsoft.VSTS.Common.Priority", "value": args["priority"]})
+        
+        url = f"https://dev.azure.com/{self.organization}/{project}/_apis/wit/workitems/$Test Case?api-version=7.1"
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(url, headers=headers, json=operations)
+            if resp.status_code >= 400:
+                logger.error(f"❌ REST API error {resp.status_code}: {resp.text}")
+                return {"text": f"REST error {resp.status_code}: {resp.text}", "error": "http_error"}
+            
+            result = resp.json()
+            logger.info(f"✅ REST API created test case: {result.get('id')}")
+            return result
+
+    async def _rest_add_test_cases_to_suite(self, args: dict[str, Any]) -> Any:
+        """Add test cases to suite via REST API."""
+        project = args.get("project", self.project)
+        plan_id = args.get("planId")
+        suite_id = args.get("suiteId")
+        test_case_ids = args.get("testCaseIds")
+        
+        if not all([project, plan_id, suite_id, test_case_ids]):
+            return {"text": "REST error: Missing required fields", "error": "missing_fields"}
+        
+        # Normalize test_case_ids to list
+        if isinstance(test_case_ids, str):
+            test_case_ids = [test_case_ids]
+        
+        token = base64.b64encode(f":{self._pat}".encode("utf-8")).decode("utf-8")
+        headers = {
+            "Authorization": f"Basic {token}",
+            "Content-Type": "application/json",
+        }
+        
+        results = []
+        for test_case_id in test_case_ids:
+            url = f"https://dev.azure.com/{self.organization}/{project}/_apis/testplan/Plans/{plan_id}/Suites/{suite_id}/TestCase/{test_case_id}?api-version=7.1-preview.3"
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(url, headers=headers)
+                if resp.status_code >= 400:
+                    logger.error(f"❌ REST API error {resp.status_code} for test case {test_case_id}: {resp.text}")
+                    continue
+                
+                results.append(resp.json())
+                logger.info(f"✅ REST API added test case {test_case_id} to suite {suite_id}")
+        
+        return results if results else {"text": "No test cases added", "error": "none_added"}
+
+    async def _rest_list_test_cases(self, args: dict[str, Any]) -> Any:
+        """List test cases in suite via REST API."""
+        project = args.get("project", self.project)
+        plan_id = args.get("planid")  # Note: lowercase in MCP
+        suite_id = args.get("suiteid")  # Note: lowercase in MCP
+        
+        if not all([project, plan_id, suite_id]):
+            return {"text": "REST error: Missing required fields", "error": "missing_fields"}
+        
+        token = base64.b64encode(f":{self._pat}".encode("utf-8")).decode("utf-8")
+        headers = {
+            "Authorization": f"Basic {token}",
+            "Accept": "application/json",
+        }
+        
+        url = f"https://dev.azure.com/{self.organization}/{project}/_apis/testplan/Plans/{plan_id}/Suites/{suite_id}/TestCase?api-version=7.1-preview.3"
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(url, headers=headers)
+            if resp.status_code >= 400:
+                logger.error(f"❌ REST API error {resp.status_code}: {resp.text}")
+                return {"text": f"REST error {resp.status_code}: {resp.text}", "error": "http_error"}
+            
+            result = resp.json()
+            test_cases = result.get("value", [])
+            logger.info(f"✅ REST API listed {len(test_cases)} test cases")
+            return test_cases
+
+    async def _rest_create_test_suite(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Create test suite via REST API."""
+        project = args.get("project", self.project)
+        plan_id = args.get("planId")
+        parent_suite_id = args.get("parentSuiteId")
+        name = args.get("name", "")
+        
+        if not all([project, plan_id, parent_suite_id, name]):
+            return {"text": "REST error: Missing required fields", "error": "missing_fields"}
+        
+        token = base64.b64encode(f":{self._pat}".encode("utf-8")).decode("utf-8")
+        headers = {
+            "Authorization": f"Basic {token}",
+            "Content-Type": "application/json",
+        }
+        
+        payload = {
+            "suiteType": "StaticTestSuite",
+            "name": name,
+            "parentSuite": {"id": parent_suite_id}
+        }
+        
+        url = f"https://dev.azure.com/{self.organization}/{project}/_apis/testplan/Plans/{plan_id}/suites?api-version=7.1-preview.1"
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(url, headers=headers, json=payload)
+            if resp.status_code >= 400:
+                logger.error(f"❌ REST API error {resp.status_code}: {resp.text}")
+                return {"text": f"REST error {resp.status_code}: {resp.text}", "error": "http_error"}
+            
+            result = resp.json()
+            logger.info(f"✅ REST API created test suite: {result.get('id')}")
+            return result
+
+    def _format_test_steps(self, steps: str) -> str:
+        """Format test steps for ADO XML format."""
+        if not steps:
+            return ""
+        
+        # Steps should be in format: "1. Action|Expected\n2. Action|Expected"
+        lines = steps.strip().split('\n')
+        steps_xml = '<steps id="0" last="' + str(len(lines)) + '">'
+        
+        for idx, line in enumerate(lines, 1):
+            if '|' in line:
+                # Split on first | to separate action and expected
+                parts = line.split('|', 1)
+                action = parts[0].strip().lstrip('0123456789. ')
+                expected = parts[1].strip() if len(parts) > 1 else ""
+            else:
+                action = line.strip().lstrip('0123456789. ')
+                expected = ""
+            
+            steps_xml += f'<step id="{idx}" type="ActionStep"><parameterizedString isformatted="true">&lt;DIV&gt;&lt;P&gt;{action}&lt;/P&gt;&lt;/DIV&gt;</parameterizedString><parameterizedString isformatted="true">&lt;DIV&gt;&lt;P&gt;{expected}&lt;/P&gt;&lt;/DIV&gt;</parameterizedString><description/></step>'
+        
+        steps_xml += '</steps>'
+        return steps_xml
 
     async def create_test_suite(
         self,

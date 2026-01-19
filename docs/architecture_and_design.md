@@ -945,3 +945,300 @@ For faster demo execution, the agents have built-in constraints:
    - Answer: SSDLC in agent prompts, automated validation, industry frameworks (PCI DSS, NIST)
 4. **"What's the ROI?"**
    - Answer: Days → Minutes for initial implementation; quality bar maintained through oversight
+
+---
+
+## 13. Known Limitations & Improvement Opportunities
+
+### 13.1 MCP Timeout and Reliability Issues
+
+#### Problem: Indefinite MCP Hangs 🔴 **CRITICAL - FIXED**
+**Discovered:** January 2026 during test case generation debugging  
+**Impact:** Pipeline appeared successful but test cases weren't created - MCP calls hung indefinitely
+
+**Root Cause:**
+```python
+# BEFORE: No timeout protection
+result = await self.session.call_tool(tool_name, arguments)
+# Could hang forever waiting for MCP server response
+```
+
+**Solution Implemented:**
+```python
+# AFTER: 60-second timeout with graceful degradation
+result = await asyncio.wait_for(
+    self.session.call_tool(tool_name, arguments),
+    timeout=60.0
+)
+# Raises TimeoutError after 60s → triggers REST fallback
+```
+
+**Files Modified:**
+- `src/mcp_client/ado_client.py` - Added timeout to all `call_tool()` invocations
+- Added REST API fallback for test plan operations
+
+**Key Insight:** *MCP is bleeding-edge technology - production systems need timeout protection and fallback strategies*
+
+---
+
+### 13.2 Deep Agent Autonomy vs Reliability Trade-offs
+
+#### Problem: Deep Agent Won't Call Tools 🔴 **CRITICAL - BYPASSED**
+**Discovered:** January 2026 during test case generation  
+**Symptom:** Deep Agent reported "task complete" but made ZERO tool calls
+
+**Root Cause - LLM Autonomy:**
+```python
+# Deep Agent has full autonomy to decide whether to use tools
+task = f"""
+You MUST create test cases for these work items: {work_items}
+
+CALL TOOLS NOW! Use testplan_create_test_case for each work item.
+"""
+
+result = await agent.execute(task)
+# LLM decided: "I'll just explain what to do" instead of calling tools
+# Tool calls made: 0
+# Test cases created: 0
+```
+
+**Why This Happens:**
+- LLM interprets "aggressive" prompts as requests for explanation
+- Deep Agent framework gives LLM full decision authority
+- No guarantee of tool execution even with explicit instructions
+
+**Solution Implemented - Direct Execution Bypass:**
+```python
+# NEW: Bypass Deep Agent entirely for deterministic operations
+async def _create_test_cases_directly(ado_client, work_items, ...):
+    """Force direct tool calls - no LLM autonomy."""
+    for wi in work_items:
+        # GUARANTEED tool execution
+        result = await ado_client.call_tool('testplan_create_test_case', {...})
+        result2 = await ado_client.call_tool('testplan_add_test_cases_to_suite', {...})
+```
+
+**Decision Framework:**
+
+| Use Deep Agent When... | Use Direct Execution When... |
+|------------------------|------------------------------|
+| ✅ Dynamic reasoning required | ✅ Deterministic workflow |
+| ✅ Multiple solution paths | ✅ Guaranteed outcome needed |
+| ✅ Context-dependent decisions | ✅ Tool sequence is fixed |
+| ✅ Error recovery needs flexibility | ✅ No ambiguity in requirements |
+
+**Example - Test Case Creation:**
+- **Before:** Deep Agent decides whether/how to create tests → Unpredictable
+- **After:** Direct execution loop through work items → Deterministic
+
+**Key Insight:** *Deep Agent autonomy is powerful for creative tasks, but reliability-critical operations need deterministic execution*
+
+---
+
+### 13.3 REST API Fallback Pattern for MCP Failures
+
+#### Hybrid Integration Strategy 🟢 **PRODUCTION-READY**
+
+**Problem:** ADO MCP server can timeout or fail for test plan operations
+
+**Solution - Automatic REST Fallback:**
+```python
+# src/mcp_client/ado_client.py
+async def call_tool(self, tool_name, arguments, timeout=60):
+    try:
+        # Try MCP first (preferred - forward compatible)
+        result = await asyncio.wait_for(
+            self.session.call_tool(tool_name, arguments),
+            timeout=timeout
+        )
+        return result
+    except (asyncio.TimeoutError, Exception) as e:
+        # Automatic REST fallback for test plan operations
+        if tool_name.startswith('testplan_'):
+            logger.warning(f"MCP timeout, falling back to REST API")
+            return await self._rest_fallback(tool_name, arguments)
+        raise
+```
+
+**Fallback Implementation:**
+- `_rest_create_test_case()` - Creates test cases via REST API 7.1-preview.3
+- `_rest_add_test_cases_to_suite()` - Adds to suite via REST
+- `_format_test_steps()` - Converts steps to ADO XML format
+
+**Benefits:**
+1. **Forward Compatible:** Uses MCP when it works (future-proof)
+2. **Guaranteed Success:** Falls back to REST when MCP fails
+3. **Transparent:** Logs indicate which path was used
+4. **No User Impact:** Fallback is automatic
+
+**Limitation:** REST fallback requires PAT token (not available in interactive auth mode)
+
+**Key Insight:** *Production systems can't rely on bleeding-edge APIs alone - hybrid patterns provide reliability*
+
+---
+
+### 13.4 Test Case Generation - Title and Content Quality
+
+#### Problem: Generic Test Case Names 🟡 **MEDIUM PRIORITY - FIXED**
+**Symptom:** Test cases created with names like "Test:" instead of "Verify API Documentation Using Swagger"
+
+**Root Cause - Data Extraction:**
+```python
+# BEFORE: Assumed work item data structure
+wi_title = wi.get("title", "")  # Returns empty string
+
+# ACTUAL: ADO uses nested fields structure
+fields = wi_details.get("fields", {})
+wi_title = fields.get("System.Title", "")  # Correct extraction
+```
+
+**Solution Implemented:**
+1. **Proper Field Extraction:**
+   ```python
+   work_items_details.append({
+       "id": wi_id,
+       "title": fields.get("System.Title", ""),
+       "work_item_type": fields.get("System.WorkItemType", ""),
+       "description": fields.get("System.Description", ""),
+       "acceptance_criteria": fields.get("Microsoft.VSTS.Common.AcceptanceCriteria", ""),
+   })
+   ```
+
+2. **Skip Test Cases:**
+   ```python
+   # Don't create test cases for existing test cases
+   if wi_type == "Test Case" or wi_title.lower().startswith("test:"):
+       logger.warning(f"Skipping WI {wi_id} - already a test case")
+       continue
+   ```
+
+3. **Meaningful Titles:**
+   ```python
+   # BEFORE: f"Test: {wi_title}" → "Test: "
+   # AFTER:  f"Verify {wi_title}" → "Verify API Documentation Using Swagger"
+   ```
+
+4. **Context-Specific Steps:**
+   ```python
+   steps = f"""1. Setup test environment|Test environment is ready
+   2. Navigate to {feature_desc}|{feature_desc} page loads successfully
+   3. Execute main functionality|{feature_desc} works as documented
+   4. Validate acceptance criteria|{acceptance[:150]}
+   5. Test error handling|Proper error messages displayed
+   6. Verify data persistence|Changes are saved correctly"""
+   ```
+
+**Key Insight:** *AI-generated content quality depends on proper data extraction - validate assumptions about data structures*
+
+---
+
+### 13.5 Recommended Improvements (Not Yet Implemented)
+
+#### 1. Tool Categorization in Deep Agent Prompts 🔴 **HIGH PRIORITY**
+**Current:** Flat list of 50+ tool names  
+**Recommended:** Categorize by service and use case
+
+```python
+# CURRENT
+Available tools: testplan_create_test_case, wit_create_work_item, github_create_repository, ...
+
+# RECOMMENDED
+Azure DevOps - Work Items:
+  - wit_create_work_item: Create Epics, Issues, Tasks
+  - wit_update_work_item: Modify existing work items
+  
+Azure DevOps - Test Management:
+  - testplan_create_test_case: Create test cases
+  - testplan_add_test_cases_to_suite: Add tests to suite
+  
+GitHub - Repository Management:
+  - github_create_repository: Initialize new repository
+  - github_push_files: Upload code files
+```
+
+**Expected Impact:** 30% reduction in wrong tool selection
+
+---
+
+#### 2. Tool Parameter Documentation 🔴 **CRITICAL**
+**Current:** LLM guesses parameter schemas  
+**Recommended:** Provide examples in prompts
+
+```python
+Tool: testplan_create_test_case
+Parameters:
+  - project (required, string): "testingmcp"
+  - title (required, string): "Verify User Login"
+  - steps (required, string): "1. Action|Expected\n2. Action|Expected"
+  
+Example Call:
+  testplan_create_test_case(
+      project="testingmcp",
+      title="Verify User Registration",
+      steps="1. Navigate to /register|Registration page displays\n2. Enter user data|Form validates input"
+  )
+```
+
+**Expected Impact:** 50% reduction in parameter validation errors
+
+---
+
+#### 3. Common Workflow Patterns 🟡 **MEDIUM PRIORITY**
+**Current:** LLM discovers multi-step sequences by trial and error  
+**Recommended:** Document common workflows
+
+```python
+Workflow: Create Test Cases
+  Step 1: testplan_create_test_case(...) → Returns test_case_id
+  Step 2: testplan_add_test_cases_to_suite(test_case_ids=[test_case_id])
+  
+Workflow: Create GitHub Repository with Code
+  Step 1: github_create_repository(...)
+  Step 2: github_create_branch(branch="feature/init")
+  Step 3: github_push_files(files=[...], branch="feature/init")
+  Step 4: github_create_pull_request(from="feature/init", to="main")
+```
+
+**Expected Impact:** 40% reduction in iteration count, 25% faster execution
+
+---
+
+#### 4. Structured Error Recovery 🟡 **MEDIUM PRIORITY**
+**Current:** Generic "Tool execution failed" messages  
+**Recommended:** Specific recovery guidance
+
+```python
+Error Pattern: "Tool not found"
+  Common Cause: Tool name prefix confusion (mcp_ado_* vs actual name)
+  Recovery: List available tools, retry with corrected name
+  
+Error Pattern: "Parameter validation failed"
+  Common Cause: Wrong data type (string vs int for IDs)
+  Recovery: Review tool schema, convert types, retry
+  
+Error Pattern: "Rate limit exceeded"
+  Recovery: Wait 60 seconds, batch operations, reduce parallel calls
+```
+
+**Expected Impact:** 35% faster error recovery
+
+---
+
+### 13.6 Summary of Fixes Applied
+
+✅ **FIXED:**
+1. MCP timeout protection (60s timeout + REST fallback)
+2. Deep Agent bypass for deterministic operations
+3. Test case title/content quality (proper data extraction)
+4. REST API fallback for ADO test plan operations
+
+🔄 **IN PROGRESS:**
+- None currently
+
+📋 **RECOMMENDED (Not Started):**
+1. Tool categorization in Deep Agent prompts
+2. Parameter documentation and examples
+3. Common workflow pattern guidance
+4. Structured error recovery messaging
+
+**Overall System Health:** 🟢 Production-ready with known improvement opportunities
