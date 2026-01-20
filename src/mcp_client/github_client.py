@@ -88,19 +88,33 @@ class GitHubMCPClient:
                 await session.initialize()
                 result = await session.call_tool(tool_name, arguments)
 
+                # DEBUG: Log what GitHub MCP returns
+                logger.info(f"🔍 DEBUG GitHub MCP response for {tool_name}:")
+                logger.info(f"   - Result type: {type(result)}")
+                logger.info(f"   - Has content: {hasattr(result, 'content')}")
+                if hasattr(result, 'content'):
+                    logger.info(f"   - Content length: {len(result.content) if result.content else 0}")
+                
                 # Most MCP servers return JSON in a text payload; return raw if not parseable.
                 if result.content:
                     texts: list[str] = []
                     for item in result.content:
                         if hasattr(item, "text") and isinstance(item.text, str):
                             texts.append(item.text)
+                            logger.info(f"   - Text item ({len(item.text)} chars): {item.text[:200]}...")
                     if texts:
                         text = "\n".join(texts)
+                        logger.info(f"   - Combined text ({len(text)} chars): {text[:500]}...")
                         try:
                             import json
 
-                            return json.loads(text)
-                        except Exception:
+                            parsed = json.loads(text)
+                            logger.info(f"   - Parsed JSON type: {type(parsed)}")
+                            logger.info(f"   - Parsed JSON keys: {parsed.keys() if isinstance(parsed, dict) else 'N/A'}")
+                            return parsed
+                        except Exception as e:
+                            logger.warning(f"   - JSON parse failed: {e}")
                             return {"text": text}
 
+                logger.info(f"   - Returning raw result object")
                 return result

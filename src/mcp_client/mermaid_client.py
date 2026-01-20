@@ -80,18 +80,36 @@ class MermaidMCPClient:
         return [t["name"] for t in self._tools]
 
     async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> Any:
-        async with self._get_session() as session:
-            result = await session.call_tool(tool_name, arguments)
+        logger.info(f"🎨 MERMAID: call_tool '{tool_name}' with args: {str(arguments)[:200]}...")
+        try:
+            async with self._get_session() as session:
+                result = await session.call_tool(tool_name, arguments)
+                logger.info(f"🎨 MERMAID: Tool call succeeded, processing result...")
+                logger.info(f"🎨 MERMAID: Result type: {type(result)}")
+                logger.info(f"🎨 MERMAID: Has content: {hasattr(result, 'content')}")
 
-            if result.content:
-                content = result.content[0]
-                if hasattr(content, "text"):
-                    try:
-                        return json.loads(content.text)
-                    except Exception:
-                        return {"text": content.text}
+                if result.content:
+                    logger.info(f"🎨 MERMAID: Content length: {len(result.content)}")
+                    content = result.content[0]
+                    logger.info(f"🎨 MERMAID: Content[0] type: {type(content)}")
+                    logger.info(f"🎨 MERMAID: Has text attr: {hasattr(content, 'text')}")
+                    if hasattr(content, "text"):
+                        logger.info(f"🎨 MERMAID: Text preview: {content.text[:200]}...")
+                        try:
+                            parsed = json.loads(content.text)
+                            logger.info(f"✅ MERMAID: Successfully parsed JSON response")
+                            return parsed
+                        except Exception as e:
+                            logger.warning(f"⚠️ MERMAID: JSON parse failed: {e}, returning text")
+                            return {"text": content.text}
+                else:
+                    logger.warning(f"⚠️ MERMAID: No content in result")
 
-            return result
+                return result
+        except Exception as e:
+            logger.error(f"❌ MERMAID: call_tool failed with exception: {type(e).__name__}: {str(e)}")
+            logger.error(f"❌ MERMAID: Full traceback:", exc_info=True)
+            raise
 
     async def render_mermaid_to_file(
         self,

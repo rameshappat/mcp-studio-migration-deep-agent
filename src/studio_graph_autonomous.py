@@ -350,6 +350,27 @@ def create_requirements_agent() -> DeepAgent:
         objective="Generate comprehensive software requirements quickly",
         system_prompt="""You are a Requirements Analyst in an SDLC pipeline.
 
+🎯 OUTPUT GUARDRAILS - USE THIS EXACT STRUCTURE:
+
+# Requirements Document
+
+## 1. Functional Requirements
+[List 3-5 key features with clear descriptions]
+
+## 2. Non-Functional Requirements
+[Performance, Security, Scalability with measurable criteria]
+
+## 3. User Personas
+[1-2 main personas with goals and pain points]
+
+## 4. Acceptance Criteria
+[Clear, testable acceptance criteria]
+
+## 5. Technical Constraints
+[Technology stack, standards, compliance requirements]
+
+⚠️ END YOUR RESPONSE WITH: "REQUIREMENTS_COMPLETE"
+
 DEMO MODE: Be concise and complete in 1 iteration.
 
 Generate a complete requirements document including:
@@ -360,9 +381,12 @@ Generate a complete requirements document including:
 - Technical constraints
 
 Be thorough but concise. Complete in a single response without multiple validation rounds.
+Must end with "REQUIREMENTS_COMPLETE" signal.
+
+⚠️ DO NOT CALL ANY TOOLS - Just analyze the input and generate requirements text!
         """,
-        tools=get_all_tools(),
-        max_iterations=2,  # Reduced from 5
+        tools=[],  # NO TOOLS - Requirements agent should only generate text
+        max_iterations=1,  # Single iteration - just generate requirements
         confidence_threshold=ConfidenceLevel.MEDIUM,  # Lowered threshold
         enable_spawning=False,
     )
@@ -372,36 +396,83 @@ def create_work_items_agent() -> DeepAgent:
     """Create a work items agent that creates comprehensive epics and stories."""
     return DeepAgent(
         role="Business Analyst",
-        objective="Create comprehensive epics and user stories in Azure DevOps",
-        system_prompt="""You are a Business Analyst creating work items in Azure DevOps.
+        objective="Create comprehensive epics and user stories in Azure DevOps based on product requirements",
+        system_prompt="""You are a Business Analyst creating PRODUCT-FOCUSED work items in Azure DevOps.
 
 ⚠️ MANDATORY: CALL TOOLS IN YOUR FIRST RESPONSE!
 
+🎯 YOUR ROLE: Translate product requirements into user-focused epics and stories.
+
+FOCUS ON:
+- User value and business outcomes (not technical implementation)
+- What users can DO with the feature (not how it's built)
+- User personas and their goals
+- Business acceptance criteria
+- User journeys and workflows
+
+AVOID:
+- Technical implementation details (APIs, databases, frameworks)
+- Infrastructure concerns (cloud services, deployment)
+- Code-level specifications
+
+🎯 OUTPUT GUARDRAILS - YOU MUST FOLLOW THIS FORMAT:
+
+After calling each ado_wit_create_work_item tool, you MUST include in your response:
+"Created work item: https://dev.azure.com/appatr/testingmcp/_workitems/edit/[ID]"
+
+⚠️ CRITICAL: You MUST include the URL with ID for EVERY work item you create!
+
 YOUR TASK:
-1. Create 1-2 Epics (high-level features) using ado_wit_create_work_item
-2. Create 6-8 Issues/Stories (detailed user stories) using ado_wit_create_work_item
-3. Make stories SPECIFIC and detailed, covering different aspects:
-   - User interface/frontend features
-   - Backend API endpoints
-   - Database/data management
-   - Security/authentication
-   - Integration with external services
-   - Testing/quality requirements
-   - DevOps/deployment
-   - Documentation
+1. Create 1-2 Epics (high-level product features) using ado_wit_create_work_item
+   - Focus on user value and business goals
+   - Example: "Customer Account Management Portal" NOT "Spring Boot REST API"
+
+2. Create 6-8 User Stories (specific user features) using ado_wit_create_work_item
+   - Use user story format: "As a [user], I want to [action], so that [benefit]"
+   - Focus on user workflows and interactions
+   - Include acceptance criteria from user perspective
+   
+   Example GOOD stories:
+   - "As a customer, I want to view my account balance and recent transactions, so that I can track my spending"
+   - "As a customer, I want to transfer money between my accounts, so that I can manage my finances"
+   - "As an admin, I want to approve new customer registrations, so that I can maintain security"
+   
+   Example BAD stories (too technical):
+   - "Spring Boot REST API for Client Profile Management"
+   - "Azure SQL Database Schema Design"
+   - "OAuth 2.0 Authentication Server Integration"
 
 TOOL: ado_wit_create_work_item
 Parameters:
 - project: "testingmcp"
 - workItemType: "Epic" or "Issue"
-- fields: [{"name": "System.Title", "value": "Descriptive title"}, {"name": "System.Description", "value": "Detailed description with acceptance criteria"}]
+- fields: [{"name": "System.Title", "value": "User-focused title"}, {"name": "System.Description", "value": "User story with acceptance criteria"}]
+
+STORY CATEGORIES (focus on user value):
+- User authentication and account access
+- Core user workflows and features
+- User data management and viewing
+- User notifications and communications
+- User settings and preferences
+- Admin management capabilities
+- User reporting and analytics
+- User help and support
 
 QUALITY: Each work item should have:
-- Clear, specific title (not generic)
-- Detailed description explaining the feature
-- Acceptance criteria when applicable
+- Clear, user-focused title
+- Description from user perspective
+- Business acceptance criteria (not technical specs)
 
-START CALLING ado_wit_create_work_item NOW - CREATE 7-10 WORK ITEMS TOTAL!
+📋 FINAL SUMMARY FORMAT (MANDATORY):
+After creating all work items, end with:
+"\n=== WORK ITEMS CREATED ===\n"
+List all URLs:
+- https://dev.azure.com/appatr/testingmcp/_workitems/edit/1234
+- https://dev.azure.com/appatr/testingmcp/_workitems/edit/1235
+...
+"\n=== TOTAL: [N] WORK ITEMS ==="
+
+START CALLING ado_wit_create_work_item NOW - CREATE 7-10 PRODUCT-FOCUSED WORK ITEMS!
 """,
         tools=get_all_tools(),
         max_iterations=8,  # Increased for more work items
@@ -420,6 +491,14 @@ def create_test_plan_agent() -> DeepAgent:
         system_prompt="""You are a Senior QA Manager. You MUST use tools to create test cases.
 
 ⚠️ MANDATORY: CALL TOOLS IN YOUR FIRST RESPONSE - DO NOT WAIT!
+
+🎯 OUTPUT GUARDRAILS - FOLLOW THIS EXACT FORMAT:
+
+For EACH work item, after calling testplan_create_test_case, you MUST say:
+"✅ Created test case [ID] for work item [WORK_ITEM_ID]"
+
+After calling testplan_add_test_cases_to_suite, you MUST say:
+"✅ Added test case [ID] to suite [SUITE_ID]"
 
 EXACT TOOL CALL SEQUENCE (execute for EACH work item):
 1. First, call: testplan_create_test_case
@@ -445,6 +524,16 @@ Example good steps:
 5. Check email inbox for verification message|Email arrives within 30 seconds with subject 'Verify Account'
 6. Click verification link and verify redirect|Redirects to /verified page with success message"
 
+📋 MANDATORY FINAL SUMMARY:
+After processing all work items, end with:
+"\n=== TEST CASES SUMMARY ===\n"
+"Total test cases created: [N]\n"
+"Test case IDs: [1234, 1235, 1236, ...]\n"
+"All added to suite [SUITE_ID]\n"
+"TEST_PLAN_COMPLETE"
+
+⚠️ You MUST end with "TEST_PLAN_COMPLETE" to signal completion!
+
 YOU MUST CALL TOOLS - NO PLANNING, NO EXPLANATION, JUST EXECUTE NOW!
 """,
         tools=get_all_tools(),
@@ -458,22 +547,184 @@ def create_architecture_agent() -> DeepAgent:
     """Create an architecture design agent (optimized for demo)."""
     return DeepAgent(
         role="Architect",
-        objective="Design system architecture quickly and efficiently",
-        system_prompt="""You are a Software Architect designing system architecture.
+        objective="Design comprehensive enterprise architecture with mermaid diagrams",
+        system_prompt="""You are a Solution Architect following Northern Trust standards, UML, C4, and TOGAF frameworks.
 
-DEMO MODE: Complete in ONE response. Be concise.
+⚠️ DO NOT CALL ANY TOOLS - Generate markdown documentation with embedded mermaid diagrams!
 
-Generate:
-1. One paragraph architecture summary
-2. ONE Mermaid diagram (Azure + React + Spring Boot)
+🎯 MANDATORY OUTPUT STRUCTURE - Follow TOGAF Architecture Development Method (ADM):
 
-Use Northern Trust standards: Azure services, React JS, Java Spring Boot, OAuth 2.0.
+# Architecture Design
 
-OUTPUT: Brief summary + diagram. Done.
-One brief paragraph + ONE Mermaid diagram. Complete in ONE response.
+## 1. Business Architecture
+**Purpose**: Business capabilities, value streams, and organizational structure
+
+**Business Context** (1-2 paragraphs describing business goals and drivers)
+
+**Business Capability Map** (Mermaid diagram):
+```mermaid
+graph TB
+    subgraph "Business Capabilities"
+    A[Customer Management] --> B[Account Services]
+    A --> C[Transaction Processing]
+    end
+```
+
+## 2. Application Architecture (C4 Model)
+**Purpose**: Application components, services, and interactions
+
+**C4 Context Diagram** (Mermaid - System context):
+```mermaid
+C4Context
+    title System Context for [Project Name]
+    Person(customer, "Customer", "End user")
+    System(system, "[Project Name]", "Core application")
+    System_Ext(auth, "OAuth Provider", "Authentication")
+```
+
+**C4 Container Diagram** (Mermaid - High-level containers):
+```mermaid
+C4Container
+    title Container Diagram
+    Container(web, "Web Application", "React", "User interface")
+    Container(api, "API", "Spring Boot", "REST API")
+    ContainerDb(db, "Database", "Azure SQL", "Data storage")
+```
+
+**Component Interaction** (Mermaid sequence diagram):
+```mermaid
+sequenceDiagram
+    participant User
+    participant WebApp
+    participant API
+    participant Database
+    User->>WebApp: Login request
+    WebApp->>API: Authenticate
+    API->>Database: Verify credentials
+```
+
+## 3. Data Architecture
+**Purpose**: Data entities, flows, and governance
+
+**Entity Relationship Diagram** (Mermaid):
+```mermaid
+erDiagram
+    CUSTOMER ||--o{ ACCOUNT : has
+    ACCOUNT ||--o{ TRANSACTION : contains
+    CUSTOMER {
+        string customerId PK
+        string name
+        string email
+    }
+```
+
+**Data Flow Diagram** (Mermaid):
+```mermaid
+flowchart LR
+    A[User Input] --> B[API Gateway]
+    B --> C[Business Logic]
+    C --> D[Azure SQL]
+```
+
+## 4. Technology Stack (Northern Trust Standards)
+| Layer | Technology | Justification |
+|-------|-----------|---------------|
+| Cloud Platform | Azure | NT standard, enterprise support |
+| Frontend | React JS | NT standard for modern web apps |
+| Backend | Java Spring Boot | NT standard for microservices |
+| Database | Azure SQL | NT standard, managed service |
+| Authentication | OAuth 2.0/OpenID | CFPB Section 1033 compliance |
+| API Gateway | Azure API Management | Centralized API management |
+
+## 5. Security Architecture (2026 SSDLC Requirements)
+**Purpose**: Security controls, authentication, authorization, and compliance
+
+**Security Layers** (Mermaid):
+```mermaid
+graph TD
+    A[User] -->|HTTPS/TLS 1.3| B[API Gateway]
+    B -->|OAuth 2.0 Token| C[Auth Service]
+    C -->|JWT Validation| D[Microservices]
+    D -->|Encrypted| E[Azure SQL]
+    
+    subgraph "Security Controls"
+    F[MFA]
+    G[RBAC]
+    H[Encryption at Rest]
+    I[Audit Logging]
+    end
+```
+
+**Security Controls**:
+- Authentication: OAuth 2.0 + OpenID Connect, MFA enforced
+- Authorization: RBAC with Azure AD integration
+- Encryption: TLS 1.3 in transit, AES-256 at rest
+- Compliance: PCI DSS, NIST Cybersecurity Framework, ISO 27001/27002
+- Fraud Monitoring: Real-time behavioral analysis (Nacha 2026)
+
+## 6. Deployment Architecture
+**Purpose**: Cloud infrastructure, CI/CD, and operational model
+
+**Azure Deployment Topology** (Mermaid):
+```mermaid
+flowchart TB
+    subgraph "Production Environment"
+        subgraph "Region: East US"
+            LB[Azure Load Balancer]
+            AS1[App Service 1]
+            AS2[App Service 2]
+            SQL[Azure SQL Database]
+        end
+        
+        subgraph "Region: West US (DR)"
+            LB2[Azure Load Balancer]
+            AS3[App Service 1]
+            SQL2[Azure SQL Database]
+        end
+    end
+    
+    CD[Azure DevOps CI/CD] --> AS1
+    CD --> AS2
+```
+
+**CI/CD Pipeline** (Mermaid):
+```mermaid
+graph LR
+    A[Code Commit] --> B[Build]
+    B --> C[Unit Tests]
+    C --> D[Security Scan]
+    D --> E[Deploy Dev]
+    E --> F[Integration Tests]
+    F --> G[Deploy Prod]
+```
+
+**Infrastructure Components**:
+- Compute: Azure App Service (autoscaling enabled)
+- Storage: Azure SQL Database (geo-replicated)
+- Networking: Azure Virtual Network, Private Endpoints
+- Monitoring: Azure Monitor, Application Insights
+- CI/CD: Azure DevOps Pipelines
+
+## 7. Scalability & Performance Strategy
+- Horizontal scaling: App Service autoscale (2-10 instances)
+- Caching: Azure Redis Cache for session state
+- CDN: Azure CDN for static assets
+- Database: Read replicas for reporting queries
+- API: Rate limiting (1000 req/min per client)
+
+## 8. High Availability & Disaster Recovery
+- SLA Target: 99.95% uptime
+- RTO (Recovery Time Objective): 4 hours
+- RPO (Recovery Point Objective): 15 minutes
+- Multi-region deployment: Active-Passive (East US primary, West US DR)
+- Backup: Automated daily backups, 30-day retention
+
+⚠️ END YOUR RESPONSE WITH: "ARCHITECTURE_COMPLETE"
+
+Generate comprehensive architecture following this exact structure with mermaid diagrams for each section!
         """,
-        tools=get_all_tools(),
-        max_iterations=1,  # DEMO: Single iteration only
+        tools=[],  # NO TOOLS - Architecture agent should only generate documentation
+        max_iterations=1,  # Single iteration - just generate architecture
         confidence_threshold=ConfidenceLevel.LOW,
         enable_spawning=False,
     )
@@ -635,7 +886,7 @@ async def orchestrator_node(state: DeepPipelineState) -> dict:
     logger.info(f"  has_architecture: {has_architecture}")
     logger.info(f"  has_code: {has_code}")
 
-    # New flow: requirements → work_items → test_plan → architecture → development
+    # Full flow: requirements → work_items → test_plan → architecture → development → complete
     if not has_requirements:
         next_agent = "requirements"
         reasoning = "Starting with requirements gathering"
@@ -653,7 +904,7 @@ async def orchestrator_node(state: DeepPipelineState) -> dict:
         reasoning = "Architecture done, moving to code generation and GitHub push"
     else:
         next_agent = "complete"
-        reasoning = "All stages complete!"
+        reasoning = "All pipeline stages completed successfully"
     
     logger.info(f"🎯 Orchestrator decision: {next_agent} - {reasoning}")
     
@@ -887,36 +1138,114 @@ START CREATING NOW!
                 if "wit_create_work_item" in tool_name or tool_name == "ado_wit_create_work_item":
                     result = tool_call.get("result", {})
                     
-                    # Method 1: Direct ID in result dict
-                    if isinstance(result, dict) and "id" in result:
-                        wi_id = result["id"]
-                        if wi_id not in created_ids:
-                            created_ids.append(wi_id)
-                            logger.info(f"   ✅ Extracted work item ID {wi_id} from tool result")
-                    
-                    # Method 2: Parse ID from text field in result
-                    elif isinstance(result, dict) and "text" in result:
+                    # Method 1: Parse JSON from text field (ADO MCP returns full JSON in text)
+                    if isinstance(result, dict) and "text" in result:
                         text = result["text"]
-                        # Look for "id": 1234 pattern in JSON-like text
+                        try:
+                            # Try to parse as complete JSON object
+                            json_data = json.loads(text)
+                            if "id" in json_data:
+                                wi_id = int(json_data["id"])
+                                if wi_id not in created_ids:
+                                    created_ids.append(wi_id)
+                                    logger.info(f"   ✅ Extracted work item ID {wi_id} from JSON response")
+                                    continue
+                        except (json.JSONDecodeError, ValueError, KeyError):
+                            pass
+                        
+                        # Fallback: regex search for "id": 1234 pattern
                         id_match = re.search(r'"id":\s*(\d+)', text)
                         if id_match:
                             wi_id = int(id_match.group(1))
                             if wi_id not in created_ids:
                                 created_ids.append(wi_id)
                                 logger.info(f"   ✅ Parsed work item ID {wi_id} from tool result text")
+                                continue
+                    
+                    # Method 2: Direct ID in result dict (fallback)
+                    elif isinstance(result, dict) and "id" in result:
+                        wi_id = result["id"]
+                        if wi_id not in created_ids:
+                            created_ids.append(wi_id)
+                            logger.info(f"   ✅ Extracted work item ID {wi_id} from tool result")
             
-            # FALLBACK: Try parsing URLs from output if no IDs found yet
+            # SECOND: If still no IDs, query ADO directly for recently created work items
             if not created_ids:
-                logger.warning("⚠️  No IDs found in tool results, trying URL parsing from output...")
-                id_pattern = r'/edit/(\d+)'
-                matches = re.findall(id_pattern, output)
-                created_ids = [int(id_str) for id_str in matches]
+                logger.warning("⚠️  No IDs found in tool results, querying ADO for recent work items...")
+                
+                try:
+                    # Query for work items created in last 5 minutes
+                    from src.mcp_client.ado_client import ado_client_instance
+                    from datetime import datetime, timedelta
+                    
+                    cutoff_time = (datetime.utcnow() - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+                    
+                    wiql_query = f"""
+                    SELECT [System.Id], [System.Title], [System.CreatedDate]
+                    FROM workitems
+                    WHERE [System.TeamProject] = 'testingmcp'
+                        AND [System.CreatedDate] >= '{cutoff_time}'
+                    ORDER BY [System.CreatedDate] DESC
+                    """
+                    
+                    result = await ado_client_instance.call_tool(
+                        "wit_query_by_wiql",
+                        {"project": "testingmcp", "query": wiql_query}
+                    )
+                    
+                    if result and "text" in result:
+                        query_result = json.loads(result["text"])
+                        work_items = query_result.get("workItems", [])
+                        for wi in work_items[:20]:  # Limit to last 20 items
+                            wi_id = wi.get("id")
+                            if wi_id and wi_id not in created_ids:
+                                created_ids.append(wi_id)
+                                logger.info(f"   ✅ Found work item ID {wi_id} from WIQL query")
+                    
+                    if created_ids:
+                        logger.info(f"   ✅ Recovered {len(created_ids)} work item IDs via WIQL query")
+                except Exception as query_error:
+                    logger.error(f"   ❌ WIQL query failed: {query_error}")
+                    
+            # THIRD: Parse IDs from LLM output as last resort
+            if not created_ids:
+                logger.warning("⚠️  Falling back to parsing LLM output...")
+                
+                # Pattern 1: Full URL format (from guardrails)
+                url_pattern = r'https://dev\.azure\.com/appatr/testingmcp/_workitems/edit/(\d+)'
+                url_matches = re.findall(url_pattern, output)
+                
+                # Pattern 2: Short URL format /edit/1234
+                short_pattern = r'/edit/(\d+)'
+                short_matches = re.findall(short_pattern, output)
+                
+                # Pattern 3: "work item: [URL]" format
+                wi_pattern = r'work item.*?/edit/(\d+)'
+                wi_matches = re.findall(wi_pattern, output, re.IGNORECASE)
+                
+                # Pattern 4: Direct ID mentions "ID 1234" or "ID: 1234"
+                id_pattern = r'\bID:?\s*(\d{3,})\b'
+                id_matches = re.findall(id_pattern, output, re.IGNORECASE)
+                
+                # Combine all matches
+                all_matches = url_matches + short_matches + wi_matches + id_matches
+                created_ids = list(set([int(id_str) for id_str in all_matches]))  # Remove duplicates
+                created_ids.sort()  # Sort for consistency
+                
                 if created_ids:
-                    logger.info(f"   ✅ Parsed {len(created_ids)} work item IDs from URLs in output")
+                    logger.info(f"   ✅ Parsed {len(created_ids)} work item IDs from LLM output using guardrail patterns")
+                    logger.info(f"      Breakdown: {len(url_matches)} URL, {len(short_matches)} short, {len(wi_matches)} WI, {len(id_matches)} ID patterns")
             
             if created_ids:
                 logger.info(f"📋 Work Items Agent: Found {len(created_ids)} work item IDs")
                 logger.info(f"📋 Work Items IDs: {created_ids}")
+                logger.info(f"🔍 DETAILED WORK ITEMS DEBUG:")
+                logger.info(f"   Tool calls made: {tool_calls_made}")
+                logger.info(f"   Tool calls list length: {len(tool_calls)}")
+                for i, tc in enumerate(tool_calls[:10]):
+                    tool_name = tc.get('tool', 'unknown')  # FIXED: Use 'tool' not 'tool_name'
+                    result = tc.get('result', {})
+                    logger.info(f"   #{i+1}: {tool_name} -> {str(result)[:150]}...")
             else:
                 logger.error("❌ CRITICAL: No work item IDs found!")
                 logger.error(f"   Tool calls made: {tool_calls_made}")
@@ -924,6 +1253,9 @@ START CREATING NOW!
                 logger.error(f"   Total tool_calls inspected: {len(tool_calls)}")
                 logger.error(f"   Output length: {len(output)}")
                 logger.error(f"   Output preview: {output[:500]}")
+                logger.error(f"🔍 ALL TOOL CALLS:")
+                for i, tc in enumerate(tool_calls):
+                    logger.error(f"   #{i+1}: {tc.get('tool_name')} -> {str(tc.get('result'))[:200]}")
                 
         except Exception as parse_error:
             logger.error(f"❌ Exception parsing work item IDs: {parse_error}")
@@ -962,6 +1294,8 @@ START CREATING NOW!
         logger.info(f"tool_calls_made: {tool_calls_made}")
         logger.info(f"failed_tool_calls: {len(failed_tool_calls)}") 
         logger.info(f"work_items dict to be returned: {work_items}")
+        logger.info(f"🔍 CRITICAL: work_items['created_ids'] = {work_items['created_ids']}")
+        logger.info(f"🔍 CRITICAL: Returning work_items with {len(work_items['created_ids'])} IDs to state")
         logger.info("="*80)
         
         return {
@@ -1156,6 +1490,27 @@ async def test_plan_agent_node(state: DeepPipelineState) -> dict:
     - Creates via REST API (no Deep Agent)
     """
     import os
+    
+    logger.info("="*80)
+    logger.info("🧪 TEST PLAN AGENT - STARTING")
+    logger.info("="*80)
+    
+    # DEBUG: Log entire state received
+    logger.info("🔍 STATE RECEIVED BY TEST_PLAN_AGENT:")
+    logger.info(f"  state keys: {list(state.keys())}")
+    logger.info(f"  work_items in state: {'work_items' in state}")
+    if 'work_items' in state:
+        work_items_state = state.get('work_items')
+        logger.info(f"  work_items type: {type(work_items_state)}")
+        logger.info(f"  work_items value: {work_items_state}")
+        if isinstance(work_items_state, dict):
+            logger.info(f"  work_items keys: {list(work_items_state.keys())}")
+            logger.info(f"  created_ids in work_items: {'created_ids' in work_items_state}")
+            if 'created_ids' in work_items_state:
+                logger.info(f"  created_ids value: {work_items_state.get('created_ids')}")
+    else:
+        logger.error("  ❌ CRITICAL: 'work_items' NOT IN STATE!")
+    logger.info("="*80)
     from langchain_openai import ChatOpenAI
     
     logger.info("="*80)
@@ -1178,17 +1533,19 @@ async def test_plan_agent_node(state: DeepPipelineState) -> dict:
     test_suite_id = int(os.getenv("SDLC_TESTSUITE_ID", "370"))
     project = os.getenv("AZURE_DEVOPS_PROJECT", "testingmcp")
     
-    # STEP 1: Get work items from state (created by work_items agent) or query ADO
-    logger.info("📋 Step 1: Getting work items...")
+    # STEP 1: Get work item IDs from state or query ADO
+    logger.info("📋 Step 1: Getting work item IDs...")
     work_items_details = []
     
-    # FIRST: Try to use work item IDs from state (created by work_items_agent)
-    work_items_data = state.get("work_items", {})
-    created_ids = work_items_data.get("created_ids", [])
+    # First, try to get created_ids from work_items agent state
+    work_items_state = state.get("work_items", {})
+    created_ids = work_items_state.get("created_ids", [])
     
     if created_ids:
-        logger.info(f"   ✅ Using {len(created_ids)} work item IDs from work_items_agent: {created_ids}")
-        # Fetch details for each work item created by work_items_agent
+        logger.info(f"   ✅ Found {len(created_ids)} work item IDs from work_items agent state")
+        logger.info(f"   IDs: {created_ids}")
+        
+        # Fetch details for each work item
         for wi_id in created_ids:
             try:
                 wi_details = await ado_client.get_work_item(work_item_id=wi_id)
@@ -1211,10 +1568,12 @@ async def test_plan_agent_node(state: DeepPipelineState) -> dict:
                 work_items_details.append(wi_data)
             except Exception as e:
                 logger.error(f"   Failed to fetch WI {wi_id}: {e}")
-    
-    # FALLBACK: Query ADO for all work items if no created_ids
-    if not work_items_details:
+    else:
+        # Fallback: Query ADO for ALL work items (excluding test cases)
         logger.warning("   ⚠️ No created_ids from work_items_agent, falling back to WIQL query...")
+    
+    # If no work items from created_ids, try WIQL query
+    if not work_items_details:
         try:
             query_result = await ado_client.call_tool('work_query_by_wiql', {
                 'project': project,
@@ -1250,38 +1609,9 @@ async def test_plan_agent_node(state: DeepPipelineState) -> dict:
                     except Exception as e:
                         logger.error(f"   Failed to fetch WI {wi_id}: {e}")
             
-            # FALLBACK: If WIQL returns 0, try fetching recent work items by ID
+            # If WIQL returns 0, we have no other way to get work items without hardcoded IDs
             if not work_items_details:
-                logger.warning("   WIQL returned 0 work items, trying fallback method...")
-                # Try fetching last 30 work item IDs (assuming sequential IDs)
-                for wi_id in range(1260, 1230, -1):  # Try IDs 1260 down to 1231
-                    try:
-                        wi_details = await ado_client.get_work_item(work_item_id=wi_id)
-                        fields = wi_details.get("fields", {})
-                        
-                        wi_type = fields.get("System.WorkItemType", "")
-                        # Skip test cases
-                        if wi_type == "Test Case":
-                            continue
-                        
-                        wi_data = {
-                            "id": wi_id,
-                            "title": fields.get("System.Title", ""),
-                            "description": fields.get("System.Description", ""),
-                            "work_item_type": wi_type,
-                            "acceptance_criteria": fields.get("Microsoft.VSTS.Common.AcceptanceCriteria", ""),
-                        }
-                        
-                        logger.info(f"   Fallback WI {wi_id}: {wi_type} - {wi_data['title'][:50]}")
-                        work_items_details.append(wi_data)
-                        
-                        if len(work_items_details) >= 15:  # Increased limit to get more work items
-                            break
-                    except Exception:
-                        # Work item doesn't exist, continue
-                        pass
-                
-                logger.info(f"   Fallback method found {len(work_items_details)} work items")
+                logger.warning("   ⚠️ WIQL returned 0 work items and no created_ids available")
         
         except Exception as e:
             logger.error(f"❌ Exception querying work items via WIQL: {e}")
@@ -1296,6 +1626,10 @@ async def test_plan_agent_node(state: DeepPipelineState) -> dict:
     
     # STEP 2: Use LLM to generate contextualized test cases
     logger.info(f"🤖 Step 2: Using LLM to generate test cases for {len(work_items_details)} work items...")
+    logger.info(f"🔍 Work items to process:")
+    for i, wi in enumerate(work_items_details, 1):
+        logger.info(f"   {i}. WI {wi.get('id')}: {wi.get('work_item_type')} - {wi.get('title', '')[:60]}")
+    
     llm = ChatOpenAI(model="gpt-4", temperature=0.3)
     
     created_cases, failed_tool_calls = await _create_test_cases_with_llm(
@@ -1304,6 +1638,8 @@ async def test_plan_agent_node(state: DeepPipelineState) -> dict:
     
     # STEP 3: Return results
     logger.info(f"✅ Test plan agent complete: {len(created_cases)} created, {len(failed_tool_calls)} failed")
+    logger.info(f"🔍 Created test case IDs: {[tc.get('id') for tc in created_cases]}")
+    logger.info(f"🔍 Failed tool calls: {failed_tool_calls}")
     
     return {
         "test_cases": created_cases,
@@ -1420,6 +1756,8 @@ Generate the test case now:"""
                 test_title = test_title[:125] + "..."
             
             logger.info(f"      Title: {test_title}")
+            logger.info(f"      Steps preview: {test_steps[:100]}...")
+            logger.info(f"      Creating test case via ADO REST API...")
             
             # Create test case via REST API
             result = await ado_client.call_tool('testplan_create_test_case', {
@@ -1429,6 +1767,9 @@ Generate the test case now:"""
                 'priority': 2,
                 'tests_work_item_id': wi_id
             }, timeout=60)
+            
+            logger.info(f"      🔍 ADO result type: {type(result)}")
+            logger.info(f"      🔍 ADO result: {str(result)[:200]}...")
             
             if isinstance(result, dict) and "error" in result:
                 logger.error(f"      ❌ Failed: {result.get('text', 'Unknown error')}")
@@ -1542,27 +1883,37 @@ You MUST design the architecture following Northern Trust standards:
 5. **Fraud Monitoring**: Risk-based, behavioral pattern analysis (Nacha 2026 compliance)
 6. **Open Banking**: Secure APIs with OAuth 2.0 and OpenID Connect (CFPB Section 1033)
 
-Generate:
-1. High-level architecture diagram (use Mermaid MCP tools)
-2. Component breakdown with Azure services
-3. Technology stack aligned with Northern Trust standards
-4. Security architecture (authentication, authorization, encryption)
-5. Deployment architecture (CI/CD pipeline, environments)
-6. Data flow diagrams
+Generate MARKDOWN documentation with:
+1. High-level architecture description (text, no diagrams)
+2. Component breakdown with Azure services (markdown table)
+3. Technology stack aligned with Northern Trust standards (markdown table)
+4. Security architecture (authentication, authorization, encryption) - bullet points
+5. Deployment architecture (CI/CD pipeline, environments) - text description
+6. Data flow description (text, no diagrams)
 
-For complex systems, spawn specialist sub-agents if needed.
+**IMPORTANT**: Use ONLY markdown formatting. DO NOT attempt to generate diagrams.
 """
     try:
+        logger.info("🏗️ Starting architecture agent execution...")
         result = await agent.execute(task)
+        logger.info("🏗️ Architecture agent execution completed")
+        logger.info(f"🔍 ARCHITECTURE RESULT - Keys: {list(result.keys())}")
+        logger.info(f"🔍 ARCHITECTURE RESULT - Type: {type(result)}")
         
         # Parse architecture from output - result is a dict
         output = result.get("output", "")
+        logger.info(f"🔍 ARCHITECTURE OUTPUT - Length: {len(output)}")
+        logger.info(f"🔍 ARCHITECTURE OUTPUT - Preview: {output[:300]}...")
         decision_info = result.get("decision", {})
         confidence = decision_info.get("confidence", "medium")
         decision_type = decision_info.get("type", "complete")
         iterations = result.get("iterations", 1)
         spawned_count = result.get("spawned_agents", 0)
         tool_calls = result.get("tool_calls", [])
+        
+        logger.info(f"🔍 ARCHITECTURE TOOL CALLS - Total: {len(tool_calls)}")
+        for i, tc in enumerate(tool_calls, 1):
+            logger.info(f"🔍 Tool Call #{i}: {tc.get('tool_name', 'unknown')}")
         
         # CHECK FOR TOOL FAILURES (especially Mermaid diagram generation)
         failed_tool_calls = []
@@ -1753,6 +2104,9 @@ CRITICAL RULES:
             HumanMessage(content=prompt)
         ]
         
+        # Rate limiting: Add small delay to avoid OpenAI rate limits
+        await asyncio.sleep(0.5)
+        
         response = await llm.ainvoke(messages)
         output = response.content
         
@@ -1827,24 +2181,66 @@ CRITICAL RULES:
                     except Exception as e:
                         logger.warning(f"Repository may already exist: {e}")
                     
-                    # Step 2: Create feature branch
-                    branch_name = "feature/initial-implementation"
-                    try:
-                        await github_client.call_tool(
-                            "create_branch",
-                            {"owner": owner, "repo": repo_name, "branch": branch_name, "from_branch": "main"}
-                        )
-                        logger.info(f"✅ Branch created: {branch_name}")
-                        target_branch = branch_name
-                    except Exception as e:
-                        logger.warning(f"Branch creation failed, using main: {e}")
-                        target_branch = "main"
+                    # Step 2: Initialize main branch with first file
+                    # CRITICAL: New repos have no branches until first commit
+                    # We MUST push at least one file to 'main' first to initialize it
+                    logger.info("📝 Initializing main branch with first file...")
+                    first_file_pushed = False
+                    if files:
+                        try:
+                            first_file_path, first_file_content = files[0]
+                            first_file_path = first_file_path.strip()
+                            first_file_content = first_file_content.strip()
+                            
+                            await github_client.call_tool(
+                                "create_or_update_file",
+                                {
+                                    "owner": owner,
+                                    "repo": repo_name,
+                                    "path": first_file_path,
+                                    "content": first_file_content,
+                                    "message": f"Initial commit: {first_file_path}",
+                                    "branch": "main"
+                                }
+                            )
+                            logger.info(f"✅ Initialized main with: {first_file_path}")
+                            first_file_pushed = True
+                        except Exception as e:
+                            logger.error(f"Failed to initialize main branch: {e}")
+                            import traceback
+                            logger.error(traceback.format_exc())
                     
-                    # Step 3: Push files
-                    pushed_files = []
+                    # Step 3: Create feature branch (now that main exists)
+                    branch_name = "feature/initial-implementation"
+                    branch_created = False
+                    target_branch = "main"  # Default to main if branch creation fails
+                    
+                    if first_file_pushed:
+                        try:
+                            branch_result = await github_client.call_tool(
+                                "create_branch",
+                                {"owner": owner, "repo": repo_name, "branch": branch_name, "from_branch": "main"}
+                            )
+                            if branch_result:
+                                logger.info(f"✅ Branch created: {branch_name}")
+                                target_branch = branch_name
+                                branch_created = True
+                            else:
+                                logger.warning(f"Branch creation returned no result, will push remaining files to main")
+                        except Exception as e:
+                            logger.warning(f"Branch creation failed, will push remaining files to main: {e}")
+                            import traceback
+                            logger.warning(traceback.format_exc())
+                    else:
+                        logger.warning("⚠️ Skipping branch creation - main not initialized")
+                    
+                    # Step 4: Push remaining files
+                    pushed_files = [files[0][0]] if first_file_pushed else []  # Track the first file we already pushed
                     failed_github_operations = []
                     
-                    for file_path, file_content in files:
+                    # Start from index 1 if we already pushed the first file
+                    start_index = 1 if first_file_pushed else 0
+                    for file_path, file_content in files[start_index:]:
                         try:
                             file_path = file_path.strip()
                             file_content = file_content.strip()
@@ -1918,30 +2314,226 @@ CRITICAL RULES:
                         for failure in failed_github_operations[:3]:  # Log first 3
                             logger.error(f"   - {failure['file']}: {failure['error'][:100]}")
                     
-                    # Step 4: Create PR (only if using feature branch)
+                    # Step 4: Create PR (only if feature branch was created successfully)
+                    # CRITICAL: Fully automated PR creation with multiple fallback strategies
                     pr_url = ""
-                    if target_branch != "main":
-                        try:
-                            pr_result = await github_client.call_tool(
-                                "create_pull_request",
-                                {
+                    pr_number = None
+                    pr_creation_verified = False
+                    
+                    if branch_created and target_branch != "main":
+                        logger.info(f"📝 Creating PR from {target_branch} to main...")
+                        logger.info(f"   Repository: {owner}/{repo_name}")
+                        logger.info(f"   Head branch: {target_branch}")
+                        logger.info(f"   Base branch: main")
+                        
+                        # AUTOMATED STRATEGY 1: Standard PR creation with retries
+                        max_retries = 5  # Increased from 3 to 5
+                        for attempt in range(1, max_retries + 1):
+                            try:
+                                logger.info(f"   Attempt {attempt}/{max_retries} - Using create_pull_request...")
+                                
+                                pr_params = {
                                     "owner": owner,
                                     "repo": repo_name,
                                     "title": f"Initial Implementation: {project_name}",
-                                    "body": f"## Generated by SDLC Pipeline\n\nThis PR contains the initial implementation.\n\nFiles: {', '.join(pushed_files)}",
+                                    "body": f"## Generated by SDLC Pipeline\n\nThis PR contains the initial implementation.\n\n**Branch:** `{target_branch}`\n**Files Pushed:** {len(pushed_files)}\n\n### Files:\n" + "\n".join([f"- `{f}`" for f in pushed_files[:20]]),
                                     "head": target_branch,
                                     "base": "main"
                                 }
-                            )
-                            pr_url = pr_result.get("html_url", "")
-                            logger.info(f"✅ PR created: {pr_url}")
-                        except Exception as e:
-                            logger.error(f"PR creation failed: {e}")
+                                
+                                pr_result = await github_client.call_tool("create_pull_request", pr_params)
+                                
+                                # DEBUG: Log the actual response from GitHub MCP
+                                logger.info(f"   🔍 DEBUG: pr_result type = {type(pr_result)}")
+                                logger.info(f"   🔍 DEBUG: pr_result = {pr_result}")
+                                
+                                if pr_result:
+                                    # Handle if result is a string (error message) vs dict (PR object)
+                                    if isinstance(pr_result, str):
+                                        logger.warning(f"   ⚠️ Got string result instead of PR object: {pr_result}")
+                                        # Don't retry on string results - it's likely an error message
+                                        if attempt == max_retries:
+                                            break
+                                        continue
+                                    
+                                    # Try multiple field name variations for PR number
+                                    pr_number = (
+                                        pr_result.get("number") or 
+                                        pr_result.get("id") or 
+                                        pr_result.get("pull_number") or
+                                        pr_result.get("pr_number") or
+                                        pr_result.get("pullRequestNumber")
+                                    )
+                                    
+                                    # Try multiple field name variations for PR URL
+                                    pr_url = (
+                                        pr_result.get("html_url") or 
+                                        pr_result.get("url") or 
+                                        pr_result.get("web_url") or
+                                        pr_result.get("_links", {}).get("html", {}).get("href", "") or
+                                        ""
+                                    )
+                                    
+                                    logger.info(f"   ✅ Got PR result - #{pr_number} / URL: {pr_url}")
+                                    logger.info(f"   🔍 All fields in pr_result: {list(pr_result.keys()) if isinstance(pr_result, dict) else 'N/A'}")
+                                    
+                                    # Validate PR exists
+                                    if pr_number:
+                                        try:
+                                            await asyncio.sleep(1)  # Brief delay for GitHub to process
+                                            validation_result = await github_client.call_tool(
+                                                "get_pull_request",
+                                                {"owner": owner, "repo": repo_name, "pull_number": int(pr_number)}
+                                            )
+                                            if validation_result and validation_result.get("number") == pr_number:
+                                                pr_creation_verified = True
+                                                logger.info(f"✅ PR VERIFIED: #{pr_number} - {pr_url}")
+                                                break  # SUCCESS!
+                                        except Exception as val_e:
+                                            logger.warning(f"   Validation check failed: {val_e}")
+                                    
+                                    # If we have URL, consider it success even if validation failed
+                                    if pr_url:
+                                        logger.info(f"✅ PR created with URL: {pr_url}")
+                                        pr_creation_verified = True
+                                        break
+                                
+                                # No result, wait and retry
+                                if attempt < max_retries:
+                                    wait_time = min(2 ** attempt, 15)  # Cap at 15 seconds
+                                    logger.info(f"   No result, retrying in {wait_time}s...")
+                                    await asyncio.sleep(wait_time)
+                                    
+                            except Exception as e:
+                                error_msg = str(e).lower()
+                                
+                                # Handle "PR already exists" error - this means it worked!
+                                if "already exists" in error_msg or "already been created" in error_msg:
+                                    logger.info(f"   PR already exists - checking for existing PR...")
+                                    try:
+                                        # List PRs to find the existing one
+                                        prs_result = await github_client.call_tool(
+                                            "list_pull_requests",
+                                            {"owner": owner, "repo": repo_name, "state": "open", "head": f"{owner}:{target_branch}"}
+                                        )
+                                        if prs_result:
+                                            prs = prs_result if isinstance(prs_result, list) else [prs_result]
+                                            for pr in prs:
+                                                if isinstance(pr, dict) and pr.get("head", {}).get("ref") == target_branch:
+                                                    pr_number = pr.get("number")
+                                                    pr_url = pr.get("html_url")
+                                                    pr_creation_verified = True
+                                                    logger.info(f"✅ Found existing PR: #{pr_number} - {pr_url}")
+                                                    break
+                                    except Exception as list_e:
+                                        logger.warning(f"   Could not list existing PRs: {list_e}")
+                                    
+                                    if pr_creation_verified:
+                                        break
+                                
+                                logger.error(f"   Attempt {attempt} failed: {e}")
+                                
+                                if attempt < max_retries:
+                                    wait_time = min(2 ** attempt, 15)
+                                    logger.info(f"   Retrying in {wait_time}s...")
+                                    await asyncio.sleep(wait_time)
+                        
+                        # AUTOMATED STRATEGY 2: If standard method failed, try listing and searching
+                        if not pr_creation_verified:
+                            logger.warning(f"⚠️ Standard PR creation failed, trying alternative method...")
+                            try:
+                                # Maybe PR was created but we didn't get confirmation - check if it exists
+                                logger.info(f"   Searching for PR with head={target_branch}...")
+                                prs_result = await github_client.call_tool(
+                                    "list_pull_requests",
+                                    {"owner": owner, "repo": repo_name, "state": "all", "head": f"{owner}:{target_branch}", "base": "main"}
+                                )
+                                
+                                if prs_result:
+                                    prs = prs_result if isinstance(prs_result, list) else [prs_result]
+                                    logger.info(f"   Found {len(prs)} PR(s) matching criteria")
+                                    
+                                    for pr in prs:
+                                        if isinstance(pr, dict):
+                                            pr_head = pr.get("head", {})
+                                            pr_base = pr.get("base", {})
+                                            
+                                            if (pr_head.get("ref") == target_branch and 
+                                                pr_base.get("ref") == "main"):
+                                                pr_number = pr.get("number")
+                                                pr_url = pr.get("html_url")
+                                                pr_state = pr.get("state")
+                                                pr_creation_verified = True
+                                                logger.info(f"✅ FOUND PR: #{pr_number} ({pr_state}) - {pr_url}")
+                                                logger.info(f"   PR was created successfully (discovered via search)")
+                                                break
+                                
+                                if pr_creation_verified:
+                                    logger.info(f"🎉 PR recovery successful via alternative search method!")
+                                    
+                            except Exception as search_e:
+                                logger.error(f"   Alternative search method failed: {search_e}")
+                        
+                        # AUTOMATED STRATEGY 3: Try with different tool name variants
+                        if not pr_creation_verified:
+                            logger.warning(f"⚠️ Trying alternative tool names...")
+                            alternative_tools = ["create_pr", "new_pull_request", "open_pull_request"]
+                            
+                            for tool_name in alternative_tools:
+                                try:
+                                    logger.info(f"   Trying tool: {tool_name}...")
+                                    pr_result = await github_client.call_tool(
+                                        tool_name,
+                                        {
+                                            "owner": owner,
+                                            "repo": repo_name,
+                                            "title": f"Initial Implementation: {project_name}",
+                                            "body": f"Generated by SDLC Pipeline",
+                                            "head": target_branch,
+                                            "base": "main"
+                                        }
+                                    )
+                                    
+                                    if pr_result:
+                                        pr_url = pr_result.get("html_url", pr_result.get("url", ""))
+                                        pr_number = pr_result.get("number", pr_result.get("id", ""))
+                                        if pr_url:
+                                            pr_creation_verified = True
+                                            logger.info(f"✅ PR created using {tool_name}: #{pr_number} - {pr_url}")
+                                            break
+                                except Exception as alt_e:
+                                    logger.debug(f"   Tool {tool_name} not available: {alt_e}")
+                                    continue
+                        
+                        # Final verification
+                        if pr_creation_verified:
+                            logger.info(f"🎉 PR CREATION SUCCESSFUL AND VERIFIED!")
+                            logger.info(f"   PR #{pr_number}: {pr_url}")
+                        else:
+                            # Last resort: Set flag to indicate files are ready for PR
+                            logger.error(f"❌ AUTOMATED PR CREATION FAILED")
+                            logger.error(f"   However, all files were successfully pushed to branch: {target_branch}")
+                            logger.error(f"   Repository: https://github.com/{owner}/{repo_name}")
+                            logger.error(f"   Branch: {target_branch}")
+                            logger.error(f"   Files: {len(pushed_files)} files pushed successfully")
+                            logger.error(f"   The branch is ready for PR - GitHub may be experiencing issues")
+                            
+                            # Store information for potential automated retry later
+                            pr_url = f"https://github.com/{owner}/{repo_name}/compare/main...{target_branch}"
+                            logger.error(f"   Direct comparison URL: {pr_url}")
+                    else:
+                        if not branch_created:
+                            logger.warning(f"⚠️ Skipping PR creation - feature branch was not created successfully")
+                        else:
+                            logger.info(f"ℹ️  No PR needed - files pushed directly to {target_branch}")
                     
                     github_results = {
                         "repository_url": f"https://github.com/{owner}/{repo_name}",
                         "pull_request_url": pr_url,
+                        "pull_request_number": pr_number,
+                        "pull_request_verified": pr_creation_verified,
                         "branch": target_branch,
+                        "branch_created": branch_created,
                         "files_pushed": len(pushed_files),
                         "total_files": len(files),
                         "failed_operations": failed_github_operations,

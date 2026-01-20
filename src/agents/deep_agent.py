@@ -147,7 +147,8 @@ class DeepAgent:
 
         # Bind tools to LLM
         if tools and self.llm:
-            self.llm_with_tools = self.llm.bind_tools(tools)
+            # Force tool calling with tool_choice="required" to prevent hallucinations
+            self.llm_with_tools = self.llm.bind_tools(tools, tool_choice="required")
         else:
             self.llm_with_tools = self.llm
 
@@ -211,6 +212,7 @@ class DeepAgent:
                 f"[{self.role}] Decision: {decision.decision_type.value} "
                 f"(confidence: {decision.confidence.value})"
             )
+            logger.info(f"[{self.role}] 🔍 Total tool_calls executed so far: {len(self.tool_calls)}")
 
             # Step 4: Handle the decision
             if decision.decision_type == AgentDecisionType.COMPLETE:
@@ -267,6 +269,8 @@ class DeepAgent:
                     "reasoning": decision.reasoning,
                     "execution_history": self.execution_history,
                     "iterations": self.iteration_count,
+                    "tool_calls_made": len(self.tool_calls),
+                    "tool_calls": self.tool_calls,
                 }
 
             elif decision.decision_type == AgentDecisionType.CONTINUE:
@@ -289,6 +293,8 @@ class DeepAgent:
             "execution_history": self.execution_history,
             "requires_approval": True,
             "iterations": self.iteration_count,
+            "tool_calls_made": len(self.tool_calls),
+            "tool_calls": self.tool_calls,
         }
 
     async def _invoke_llm(self, messages: list[BaseMessage]) -> AIMessage:
@@ -343,7 +349,31 @@ class DeepAgent:
         output: str,
         context: dict[str, Any],
     ) -> AgentDecision:
-        """Analyze output and make a decision about next steps."""
+        """Analyze output and make a decision about next steps.
+        
+        Enhanced with guardrail signal detection for deterministic completion.
+        """
+        
+        # GUARDRAIL CHECK: Look for explicit completion signals in output
+        completion_signals = [
+            "REQUIREMENTS_COMPLETE",
+            "TEST_PLAN_COMPLETE", 
+            "ARCHITECTURE_COMPLETE",
+            "=== TOTAL:",  # Work items summary
+            "=== WORK ITEMS CREATED ===",  # Work items guardrail
+        ]
+        
+        output_upper = output.upper()
+        for signal in completion_signals:
+            if signal.upper() in output_upper:
+                logger.info(f"[{self.role}] 🎯 Detected completion signal: {signal}")
+                return AgentDecision(
+                    decision_type=AgentDecisionType.COMPLETE,
+                    reasoning=f"Detected completion signal '{signal}' in output - work is complete",
+                    confidence=ConfidenceLevel.VERY_HIGH,
+                    next_action="",
+                    metadata={"completion_signal": signal}
+                )
         
         # Build decision prompt
         decision_prompt = f"""You are analyzing your own output to decide next steps.
@@ -375,6 +405,10 @@ Respond with JSON:
             HumanMessage(content=decision_prompt),
         ]
 
+        # Rate limiting: Add small delay to avoid OpenAI rate limits
+        # This is called once per iteration, so minimal impact
+        await asyncio.sleep(0.5)
+        
         response = await self.llm.ainvoke(messages)
         
         # Parse decision
@@ -451,6 +485,9 @@ Respond with JSON:
             HumanMessage(content=validation_prompt),
         ]
 
+        # Rate limiting: Add small delay to avoid OpenAI rate limits
+        await asyncio.sleep(0.5)
+        
         response = await self.llm.ainvoke(messages)
         
         try:
@@ -565,8 +602,19 @@ Key principles:
     ) -> dict[str, Any]:
         """Build the final result."""
         
-        # Count total tool calls from execution history
-        tool_calls_made = sum(step.get("tool_calls", 0) for step in self.execution_history)
+        # FIX: Use actual tool_calls list length instead of execution_history counts
+        # because execution_history only tracks ATTEMPTED tool calls, not completed ones
+        tool_calls_made = len(self.tool_calls)
+        
+        logger.info(f"[{self.role}] 🔍 _build_result: tool_calls_made = {tool_calls_made}")
+        logger.info(f"[{self.role}] 🔍 _build_result: self.tool_calls length = {len(self.tool_calls)}")
+        logger.info(f"[{self.role}] 🔍 _build_result: self.tool_calls id = {id(self.tool_calls)}")
+        if self.tool_calls:
+            logger.info(f"[{self.role}] 🔍 Tool calls summary:")
+            for i, tc in enumerate(self.tool_calls[:10]):
+                logger.info(f"[{self.role}]   #{i+1}: {tc.get('tool', 'unknown')}")  # FIXED: Use 'tool' not 'tool_name'
+        else:
+            logger.error(f"[{self.role}] ❌ self.tool_calls is EMPTY in _build_result!")
         
         return {
             "status": "completed",
@@ -611,7 +659,12 @@ Key principles:
     ) -> None:
         """Record detailed tool call information for tracking."""
         
-        for tool_call, tool_result in zip(tool_calls, tool_results):
+        logger.info(f"[{self.role}] 🔍 _record_tool_executions called:")
+        logger.info(f"[{self.role}]    tool_calls length: {len(tool_calls)}")
+        logger.info(f"[{self.role}]    tool_results length: {len(tool_results)}")
+        logger.info(f"[{self.role}]    self.tool_calls before: {len(self.tool_calls)}")
+        
+        for i, (tool_call, tool_result) in enumerate(zip(tool_calls, tool_results)):
             tool_info = {
                 "tool": tool_call["name"],
                 "args": tool_call["args"],
@@ -621,5 +674,6 @@ Key principles:
                 },
             }
             self.tool_calls.append(tool_info)
+            logger.info(f"[{self.role}]    Recorded #{i+1}: {tool_call['name']} -> self.tool_calls now has {len(self.tool_calls)} items")
             
-            logger.debug(f"[{self.role}] Recorded tool execution: {tool_call['name']}")
+        logger.info(f"[{self.role}]    self.tool_calls after: {len(self.tool_calls)}")
