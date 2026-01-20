@@ -1,0 +1,12 @@
+sequenceDiagram
+    participant Investor as Tech-Savvy Investor
+    participant WebApp as Web Application
+    participant API as API Gateway
+    participant AuthService as Authentication Service
+    participant KYC as KYC/AML System
+    Investor->>WebApp: Access registration form
+    WebApp->>API: Submit registration data
+    API->>AuthService: Request authentication
+    AuthService->>KYC: Verify identity
+    KYC-->>AuthService: Verification result
+    AuthService-->>API: Authentication token

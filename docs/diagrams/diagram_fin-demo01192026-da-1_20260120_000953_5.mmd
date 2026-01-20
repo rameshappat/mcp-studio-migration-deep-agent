@@ -1,0 +1,8 @@
+erDiagram
+    USER ||--o{ ACCOUNT : owns
+    ACCOUNT ||--o{ TRANSACTION : includes
+    USER {
+        string userId PK
+        string name
+        string email
+    }

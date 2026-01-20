@@ -1,0 +1,5 @@
+flowchart LR
+    A[User Input] -->|Registration Data| B[Web Application]
+    B -->|API Call| C[API Gateway]
+    C -->|Identity Verification| D[KYC/AML System]
+    C -->|Save Data| E[Database]
