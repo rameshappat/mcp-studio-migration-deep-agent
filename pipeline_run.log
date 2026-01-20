@@ -1,0 +1,83 @@
+====================================================================================================
+AUTONOMOUS SDLC PIPELINE - FULL RUN WITH DETAILED LOGS
+====================================================================================================
+Start Time: 2026-01-19 18:35:35.486005
+
+2026-01-19 18:35:36,223 [INFO] __main__: Building graph...
+2026-01-19 18:35:36,238 [INFO] __main__: ✅ Graph compiled successfully
+
+====================================================================================================
+INITIAL INPUT
+====================================================================================================
+User Query: Build a wealth management client onboarding system with React frontend, Spring Boot backend, OAuth 2.0 authentication, and Azure SQL database
+
+2026-01-19 18:35:36,238 [INFO] __main__: Starting graph execution...
+====================================================================================================
+EXECUTION LOG
+====================================================================================================
+2026-01-19 18:35:36,273 [INFO] src.studio_graph_autonomous: Initializing MCP clients...
+2026-01-19 18:35:36,273 [INFO] src.studio_graph_autonomous: ADO client initialized for appatr/testingmcp
+2026-01-19 18:35:36,273 [INFO] src.studio_graph_autonomous: GitHub client initialized
+2026-01-19 18:35:36,273 [INFO] src.studio_graph_autonomous: Mermaid client initialized
+2026-01-19 18:35:36,273 [INFO] src.mcp_client.ado_client: Connecting to Azure DevOps MCP server for org: appatr
+{"authentication":"envvar","domains":["core","work","work-items","test-plans"],"enabledDomains":["core","work","work-items","test-plans"],"isCodespace":false,"level":"info","message":"Starting Azure DevOps MCP Server","organization":"appatr","organizationUrl":"https://dev.azure.com/appatr","timestamp":"2026-01-20T01:35:37.170Z","version":"2.4.0"}
+2026-01-19 18:35:37,186 [INFO] src.mcp_client.ado_client: Connected! Found 39 ADO tools
+✅ Connected to Azure DevOps MCP (appatr). Found 39 tools.
+2026-01-19 18:35:37,197 [INFO] src.studio_graph_autonomous: ADO connected, 39 tools available
+2026-01-19 18:35:37,197 [INFO] src.mcp_client.github_client: Listing tools from GitHub MCP server
+2026-01-19 18:35:37,563 [INFO] httpx: HTTP Request: POST https://api.githubcopilot.com/mcp "HTTP/1.1 200 OK"
+2026-01-19 18:35:37,563 [INFO] mcp.client.streamable_http: Received session ID: b2e25574-6995-4c70-91f2-7fd5f828e940
+2026-01-19 18:35:37,565 [INFO] mcp.client.streamable_http: Negotiated protocol version: 2025-11-25
+2026-01-19 18:35:37,806 [INFO] httpx: HTTP Request: POST https://api.githubcopilot.com/mcp "HTTP/1.1 202 Accepted"
+2026-01-19 18:35:37,807 [INFO] httpx: HTTP Request: GET https://api.githubcopilot.com/mcp "HTTP/1.1 405 Method Not Allowed"
+2026-01-19 18:35:37,809 [INFO] mcp.client.streamable_http: GET stream disconnected, reconnecting in 1000ms...
+2026-01-19 18:35:38,047 [INFO] httpx: HTTP Request: POST https://api.githubcopilot.com/mcp "HTTP/1.1 200 OK"
+2026-01-19 18:35:38,428 [INFO] httpx: HTTP Request: DELETE https://api.githubcopilot.com/mcp "HTTP/1.1 204 No Content"
+✅ Connected to GitHub MCP. Found 40 tools.
+2026-01-19 18:35:38,430 [INFO] src.studio_graph_autonomous: GitHub connected, 40 tools available
+STDIO MCP Server started
+2026-01-19 18:35:39,171 [INFO] src.mcp_client.mermaid_client: Connected to Mermaid MCP. Found 1 tools.
+✅ Connected to Mermaid MCP. Found 1 tools.
+2026-01-19 18:35:39,171 [INFO] src.studio_graph_autonomous: Mermaid connected
+2026-01-19 18:35:39,171 [INFO] src.mcp_client.ado_client: Connecting to Azure DevOps MCP server for org: appatr
+{"authentication":"envvar","domains":["core","work","work-items","test-plans"],"enabledDomains":["core","work","work-items","test-plans"],"isCodespace":false,"level":"info","message":"Starting Azure DevOps MCP Server","organization":"appatr","organizationUrl":"https://dev.azure.com/appatr","timestamp":"2026-01-20T01:35:39.745Z","version":"2.4.0"}
+2026-01-19 18:35:39,759 [INFO] src.mcp_client.ado_client: Connected! Found 39 ADO tools
+✅ Connected to Azure DevOps MCP (appatr). Found 39 tools.
+2026-01-19 18:35:39,772 [INFO] src.studio_graph_autonomous: ADO connected, 39 tools available
+✅ Connected to GitHub MCP. Found 40 tools.
+2026-01-19 18:35:39,772 [INFO] src.studio_graph_autonomous: GitHub connected, 40 tools available
+2026-01-19 18:35:39,772 [INFO] src.mcp_client.mermaid_client: Connected to Mermaid MCP. Found 1 tools.
+✅ Connected to Mermaid MCP. Found 1 tools.
+2026-01-19 18:35:39,772 [INFO] src.studio_graph_autonomous: Mermaid connected
+2026-01-19 18:35:39,772 [INFO] src.studio_graph_autonomous: Building tools from MCP clients...
+2026-01-19 18:35:39,772 [INFO] src.studio_graph_autonomous: Clients available: ADO=True, GitHub=True, Mermaid=True
+2026-01-19 18:35:39,772 [INFO] src.studio_graph_autonomous: ADO client has 39 tools
+2026-01-19 18:35:39,791 [INFO] src.studio_graph_autonomous: GitHub client has 40 tools
+2026-01-19 18:35:39,831 [INFO] src.studio_graph_autonomous: Mermaid client has 1 tools
+2026-01-19 18:35:39,832 [INFO] src.studio_graph_autonomous: Loaded 80 MCP tools as LangChain tools
+2026-01-19 18:35:39,832 [INFO] src.studio_graph_autonomous: MCP clients initialized. Tools available: 80
+2026-01-19 18:35:39,832 [INFO] src.studio_graph_autonomous: Client status: ADO=True, GitHub=True, Mermaid=True
+
+----------------------------------------------------------------------------------------------------
+NODE: INIT
+----------------------------------------------------------------------------------------------------
+🧪 test_plan_complete: False
+💬 system: 🚀 Initializing SDLC Pipeline for: None
+
+----------------------------------------------------------------------------------------------------
+NODE: __INTERRUPT__
+----------------------------------------------------------------------------------------------------
+
+====================================================================================================
+NODES EXECUTION SEQUENCE
+====================================================================================================
+1. init
+2. __interrupt__
+
+❌ TEST_PLAN NODE WAS NOT CALLED!
+   This means the orchestrator skipped it.
+   Likely reason: test_plan_complete flag was already True
+
+====================================================================================================
+End Time: 2026-01-19 18:35:39.834174
+====================================================================================================

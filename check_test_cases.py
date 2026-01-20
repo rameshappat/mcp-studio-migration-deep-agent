@@ -24,18 +24,21 @@ async def check_test_cases():
     print("\n📝 Test Cases in Suite 370:")
     try:
         result = await client.call_tool('testplan_list_test_cases', {
-            'planId': 369,
-            'suiteId': 370
+            'project': 'testingmcp',
+            'planid': 369,
+            'suiteid': 370
         })
         
         print(f"  Result type: {type(result)}")
         if isinstance(result, list):
             if result:
-                print(f"  ✅ Found {len(result)} test case(s)")
+                print(f"  ✅ Found {len(result)} test case(s)\n")
                 for idx, test_case in enumerate(result, 1):
-                    tc_id = test_case.get('testCase', {}).get('id', 'N/A')
-                    tc_name = test_case.get('testCase', {}).get('name', 'Unnamed')
-                    print(f"\n    {idx}. Test Case ID: {tc_id}")
+                    # The structure has workItem nested
+                    work_item = test_case.get('workItem', {})
+                    tc_id = work_item.get('id', 'N/A')
+                    tc_name = work_item.get('name', 'Unnamed')
+                    print(f"    {idx}. Test Case ID: {tc_id}")
                     print(f"       Name: {tc_name}")
             else:
                 print(f"  ⚠️  No test cases found in suite 370")

@@ -176,6 +176,7 @@ class DeepAgent:
             context = {}
 
         self.iteration_count = 0
+        self.tool_calls = []  # Track all tool calls and results
         messages = self._build_initial_messages(task, context)
         
         logger.info(f"[{self.role}] Starting execution: {task[:100]}")
@@ -196,6 +197,10 @@ class DeepAgent:
                 messages.append(response)
                 tool_results = await self._execute_tools(response.tool_calls)
                 messages.extend(tool_results)
+                
+                # Record tool calls and results for tracking
+                self._record_tool_executions(response.tool_calls, tool_results)
+                
                 continue  # Continue iteration loop after tool execution
 
             # Step 3: No more tool calls - agent has produced output
@@ -580,6 +585,7 @@ Key principles:
             "spawned_agents": len(self.spawned_agents),
             "iterations": self.iteration_count,
             "tool_calls_made": tool_calls_made,
+            "tool_calls": self.tool_calls,  # Include detailed tool call information
         }
 
     def _record_execution_step(
@@ -597,3 +603,23 @@ Key principles:
         }
         
         self.execution_history.append(step)
+    
+    def _record_tool_executions(
+        self,
+        tool_calls: list,
+        tool_results: list[ToolMessage],
+    ) -> None:
+        """Record detailed tool call information for tracking."""
+        
+        for tool_call, tool_result in zip(tool_calls, tool_results):
+            tool_info = {
+                "tool": tool_call["name"],
+                "args": tool_call["args"],
+                "result": {
+                    "text": tool_result.content,
+                    "tool_call_id": tool_result.tool_call_id,
+                },
+            }
+            self.tool_calls.append(tool_info)
+            
+            logger.debug(f"[{self.role}] Recorded tool execution: {tool_call['name']}")

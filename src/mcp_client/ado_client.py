@@ -793,8 +793,8 @@ class AzureDevOpsMCPClient:
             Work item details.
         """
         return await self.call_tool(
-            "mcp_ado_wit_get_work_item",
-            {"workItemId": work_item_id},
+            "wit_get_work_item",
+            {"id": work_item_id},
         )
 
     async def query_work_items(self, wiql: str) -> list[dict[str, Any]]:
